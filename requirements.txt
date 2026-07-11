@@ -1,0 +1,70 @@
+# =============================================================================
+# Production RAG — dependency manifest (convenience installer).
+#   Install everything at once:   uv add -r requirements.txt
+#
+# NOTE: pyproject.toml + uv.lock stay the SOURCE OF TRUTH. The command above adds
+# these as direct deps in pyproject and updates the lock. This file just lets you
+# install in one shot instead of one-by-one.
+#
+# Covers the RAG core through Phase 6. Frontend (Streamlit) and Phase-8 infra are
+# listed COMMENTED at the bottom on purpose — we install those when we reach them,
+# so we don't bloat the env with unused heavy packages now.
+# =============================================================================
+
+# --- Web API / serving -------------------------------------------------------
+fastapi
+uvicorn[standard]
+
+# --- Config, models, logging -------------------------------------------------
+pydantic
+pydantic-settings
+pyyaml
+python-json-logger
+
+# --- LLM / embeddings / structured output ------------------------------------
+openai                 # final grounded generation (API)
+instructor             # Pydantic-typed LLM outputs
+tiktoken               # token counting / context budgeting
+httpx                  # async HTTP (LLM + GitHub API)
+
+# --- Retrieval: dense + sparse + rerank --------------------------------------
+chromadb               # dense vector store
+sentence-transformers  # local embeddings + cross-encoder reranker (pulls torch)
+rank-bm25              # sparse keyword index (Phase 2)
+
+# --- Corpus ingestion (FastAPI docs + GitHub issues) -------------------------
+beautifulsoup4         # HTML doc parsing
+lxml                   # fast HTML/XML parser backend
+markdown-it-py         # markdown parsing (headings / structure)
+python-frontmatter     # YAML front-matter in docs .md files
+PyGithub               # GitHub issues fetching
+
+# --- Evaluation & analysis (Phase 4 / 6) -------------------------------------
+numpy
+pandas                 # eval tables / reports
+scikit-learn           # metrics, similarity, clustering helpers
+
+# --- Semantic cache (Phase 5) ------------------------------------------------
+redis                  # cache client (talks to a Redis server run via Docker)
+
+# --- Local judge (optional, Phase 3) -----------------------------------------
+ollama                 # local judge client (only if you run Ollama)
+
+# =============================================================================
+# DEFERRED — uncomment when we reach the phase (kept off now to avoid bloat):
+#
+# Phase 6 clustering / cache helpers (optional, may need build tools on Windows):
+#   hdbscan
+#   redisvl                    # Redis vector-search helper (needs Redis Stack)
+#
+# Phase 7 frontend (you asked to defer this):
+#   streamlit
+#
+# Phase 8 infra / observability (Python clients; the servers come via Docker):
+#   celery                     # background workers
+#   prometheus-client          # metrics
+#   opentelemetry-sdk
+#   opentelemetry-exporter-otlp
+#   psycopg[binary]            # Postgres driver
+#   pgvector                   # pgvector integration
+# =============================================================================

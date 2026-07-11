@@ -8,6 +8,7 @@
 Portfolio-grade **Production RAG** system fusing BASWE Projects 6 (Hybrid Search) + 7 (Semantic
 Cache) + 13 (Auto-Eval). Answers questions over the **FastAPI** docs + GitHub issues corpus.
 Full 9-phase plan (source of truth): `C:\Users\Hareesh\.claude\plans\hey-now-act-as-deep-creek.md`.
+Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
 
 ## Environment
 - OS: Windows 11, PowerShell (primary shell). Project root: `e:\Production_RAG`.
@@ -37,6 +38,9 @@ Full 9-phase plan (source of truth): `C:\Users\Hareesh\.claude\plans\hey-now-act
 
 ## Commands
 - Install deps: `uv sync` (or `uv add <pkg>` / `uv add --dev <pkg>`).
+- One-shot install of the whole manifest: `uv add -r requirements.txt`. NOTE: `requirements.txt` is a
+  deliberate convenience installer (grouped by phase; frontend + Phase-8 infra commented). `pyproject.toml`
+  + `uv.lock` remain the source of truth. **Do not delete `requirements.txt`.**
 - Run API: `uv run uvicorn app.main:app --reload` → `/health`, `/ready`, `/docs`.
 - Tests: `uv run pytest -m "not slow"` (fast) · `uv run pytest -m slow` (loads models) · `uv run pytest` (all).
 - Lint: `uv run ruff check .`
@@ -62,3 +66,6 @@ Full 9-phase plan (source of truth): `C:\Users\Hareesh\.claude\plans\hey-now-act
   workflow (`uv add`, `uv.lock`). All deps installed on 3.13. Built app scaffold, config, clients,
   health/ready, structured logging, smoke tests (pass). Added Commands section. Only OpenAI generation
   path awaits the user's `.env` key. Next = Phase 1.
+- 2026-07-11: Committed Phase 0 as 7 clean Conventional-Commits and pushed to GitHub
+  (origin/main, HareeshDaxton/Production-RAG). Added `.gitattributes` (LF). `.claude/settings.local.json`
+  gitignored; empty `requirements.txt` removed.
