@@ -1,0 +1,6 @@
+# Normalize line endings: store as LF in the repo, check out native per-OS.
+* text=auto eol=lf
+
+# Windows-only scripts stay CRLF.
+*.bat text eol=crlf
+*.ps1  text eol=crlf
