@@ -1,0 +1,41 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+venv/
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Runtime data (vectors, sqlite, bm25 index, logs, reports)
+data/
+*.sqlite
+*.sqlite3
+*.db
+
+# Local model / HF caches
+.cache/
+.chroma/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Test / tooling
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Claude Code local (personal) settings
+.claude/settings.local.json
