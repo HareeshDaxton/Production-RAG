@@ -25,7 +25,8 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   (`app/{routers,modules,clients,models,utils}`) so the split is mechanical, not a rewrite.
 - **Do not add infra before its phase:** Redis (cache) = Phase 5; Postgres+pgvector = Phase 8.
   Early datastores are ChromaDB (vectors) + SQLite (metadata/audit/eval) only.
-- **Models:** local embeddings (`bge-small-en-v1.5` default) + local cross-encoder rerank +
+- **Models:** local embeddings (`bge-base-en-v1.5`, **768-dim** — keep `models.embedding.dimensions`
+  in sync with the model) + local cross-encoder rerank +
   configurable judge (Ollama or cheap API). API used only for final grounded generation.
 - **No OCR** — corpus is text-first (markdown/HTML/issues JSON).
 
