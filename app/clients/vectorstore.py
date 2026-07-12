@@ -28,3 +28,14 @@ def get_chunks_collection():
         name=CHUNKS_COLLECTION,
         metadata={"hnsw:space": "cosine"},
     )
+
+
+def reset_chunks_collection():
+    """Drop and recreate the chunk collection (used for clean re-ingest / tests)."""
+    client = get_chroma_client()
+    try:
+        client.delete_collection(CHUNKS_COLLECTION)
+    except Exception:  # noqa: BLE001 - absent collection is fine
+        pass
+    logger.info("chunks collection reset")
+    return get_chunks_collection()

@@ -12,7 +12,7 @@ from app import __version__
 from app.clients.db import init_db
 from app.config import get_config
 from app.logging_config import get_logger, setup_logging
-from app.routers import health
+from app.routers import ask, health, ingest
 
 logger = get_logger(__name__)
 
@@ -36,6 +36,8 @@ def create_app() -> FastAPI:
     setup_logging(cfg.app.log_level)
     app = FastAPI(title=cfg.app.name, version=__version__, lifespan=lifespan)
     app.include_router(health.router)
+    app.include_router(ingest.router)
+    app.include_router(ask.router)
     return app
 
 

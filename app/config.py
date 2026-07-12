@@ -97,11 +97,28 @@ class RetrievalConfig(BaseModel):
     default_top_k: int = 5
 
 
+class ChunkingConfig(BaseModel):
+    strategy: str = "recursive"  # Phase 1: recursive-by-headers (others in Phase 2)
+    max_chunk_tokens: int = 512
+    overlap_tokens: int = 64
+    min_chunk_chars: int = 40  # drop trivially small fragments
+
+
+class CorpusConfig(BaseModel):
+    dir: Path = Path("data/corpus")  # default ingest source (populated by fetch script)
+
+
+class IngestionConfig(BaseModel):
+    corpus: CorpusConfig = CorpusConfig()
+    chunking: ChunkingConfig = ChunkingConfig()
+
+
 class AppConfig(BaseModel):
     app: AppMeta = AppMeta()
     paths: Paths = Paths()
     models: ModelsConfig = ModelsConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
+    ingestion: IngestionConfig = IngestionConfig()
 
 
 @lru_cache

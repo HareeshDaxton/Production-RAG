@@ -47,3 +47,12 @@ models:
 retrieval:
   default_top_k: 5
   # Hybrid (BM25 + RRF + rerank) settings arrive in Phase 2.
+
+ingestion:
+  corpus:
+    dir: data/corpus            # default source for /v1/ingest (populate via scripts/fetch_corpus.py)
+  chunking:
+    strategy: recursive         # Phase 1: recursive-by-headers (fixed/semantic added in Phase 2)
+    max_chunk_tokens: 512
+    overlap_tokens: 64
+    min_chunk_chars: 40

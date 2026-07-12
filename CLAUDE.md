@@ -47,16 +47,21 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
 - Lint: `uv run ruff check .`
 
 ## Status
-- **Phase 0 COMPLETE & validated.** Modular-monolith scaffold in place: `app/` (config, logging,
-  clients {embeddings, reranker, vectorstore, sqlite, llm}, routers/health, models, modules, utils),
-  `config/system.yaml`, `tests/`. ChromaDB + SQLite init OK; local `bge-small-en-v1.5` embeds to
-  384-dim OK; `/health` + `/ready` green. 3 fast tests pass, embedding slow test passes.
-- **One path unverified — needs user:** OpenAI generation. Add `OPENAI_API_KEY` to `.env`
-  (copy `.env.example`), then `uv run pytest` confirms `test_generation_roundtrip`.
+- **Phase 0 COMPLETE.** Modular-monolith scaffold: `app/` (config, logging, clients, routers, models,
+  modules, utils), `config/system.yaml`, tests. OpenAI key verified working.
+- **Phase 1 COMPLETE & validated (8/8 tests green, lint clean).** Working thin slice:
+  `POST /v1/ingest` (markdown loader → recursive-by-header chunker → local bge-base embed → ChromaDB)
+  and `POST /v1/ask` (dense retrieve top-k → grounded generation via `instructor` → answer + inline
+  `[n]` citations + `has_sufficient_context`). Verified end-to-end over the real HTTP API on
+  `sample_docs/` (3 docs → 12 chunks; correct cited answer). SQLite schema now ensured on every
+  connection (works for API, tests, scripts). `ingest_directory(reset=True)` clears the collection.
 - Key dep versions (3.13): fastapi 0.139, openai 2.45, instructor 1.15, chromadb 1.5.9,
-  sentence-transformers 5.6, torch 2.13.
-- **Next: Phase 1** — FastAPI corpus loader (docs + GitHub issues) → recursive chunking → dense
-  index → cited generation → `POST /v1/ingest` + `POST /v1/ask`.
+  sentence-transformers 5.6, torch 2.13. Embedding = `bge-base-en-v1.5` (768-dim).
+- **Not yet done in Phase 1 (follow-ups):** `scripts/fetch_corpus.py` for the FULL FastAPI docs +
+  GitHub issues corpus (only the small tracked `sample_docs/` is wired so far); file-upload ingest;
+  dedup/upsert on re-ingest (currently `reset=True` to avoid dupes).
+- **Next: Phase 2** — hybrid retrieval (BM25 + RRF + cross-encoder rerank), 3 switchable chunking
+  strategies, retrieval-confidence scoring.
 
 ## Update log
 - 2026-07-10: Created. Captured plan pointer, environment, architecture guardrails, conventions, status.
@@ -70,3 +75,10 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
 - 2026-07-11: Committed Phase 0 as 7 clean Conventional-Commits and pushed to GitHub
   (origin/main, HareeshDaxton/Production-RAG). Added `.gitattributes` (LF). `.claude/settings.local.json`
   gitignored; empty `requirements.txt` removed.
+- 2026-07-12: **Phase 1 COMPLETE.** Built `app/modules/{ingestion(loader,chunker,indexer,service),
+  retrieval(dense),generation(schemas,prompt,generator),pipeline}`, `app/routers/{ingest,ask}`,
+  `app/utils/tokens.py`, `sample_docs/*.md`, `tests/test_ingest_ask.py`; extended `models/schemas.py`,
+  `clients/{db,vectorstore}`, `config`. Fix: SQLite schema ensured on every connection (tests hit
+  `ingest_directory` directly, bypassing API startup). Polish: dedupe repeated section-path segments.
+  8/8 tests pass, ruff clean, live `/v1/ingest`+`/v1/ask` verified. NOT committed yet (user commits).
+  Next = Phase 2.
