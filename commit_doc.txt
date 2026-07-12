@@ -1,0 +1,160 @@
+# Conventional Commits — Complete Cheat Sheet (AI/ML Edition)
+
+Format: `<type>(<optional scope>): <short description>`
+
+---
+
+## 1. Core Standard Types (official Conventional Commits spec)
+
+| Prefix | Meaning | AI/ML Example |
+|---|---|---|
+| `feat:` | New feature | `feat: add hybrid retrieval pipeline (BM25 + dense)` |
+| `fix:` | Bug fix | `fix: resolve FAISS index dimension mismatch` |
+| `docs:` | Documentation only | `docs: add architecture diagram to README` |
+| `test:` | Add/update tests | `test: add unit tests for reranker module` |
+| `chore:` | Maintenance, no src/test change | `chore: bump langchain-core to 0.3.x` |
+| `refactor:` | Restructure code, same behavior | `refactor: extract embedding logic into service class` |
+| `perf:` | Performance improvement | `perf: batch embedding calls to reduce latency` |
+| `style:` | Formatting only, no logic change | `style: run ruff format on src/` |
+| `build:` | Build system / dependencies | `build: add sentence-transformers to pyproject.toml` |
+| `ci:` | CI/CD pipeline changes | `ci: add GitHub Actions workflow for pytest` |
+| `revert:` | Revert a previous commit | `revert: revert "feat: add cross-encoder reranker"` |
+
+---
+
+## 2. Extended Types (widely used, not in the core spec)
+
+These are common team conventions. Pick the ones you like and stay consistent.
+
+| Prefix | Meaning | AI/ML Example |
+|---|---|---|
+| `wip:` | Work in progress (avoid on main branch) | `wip: experimenting with parent-document retriever` |
+| `hotfix:` | Urgent production fix | `hotfix: patch API key leak in logging` |
+| `init:` | Initial commit / project scaffold | `init: scaffold Production_RAG with uv` |
+| `release:` | Version release | `release: v1.2.0` |
+| `deps:` | Dependency updates (alt. to chore) | `deps: pin groq==0.9.0 to fix breaking change` |
+| `config:` | Config file changes | `config: add .env.example and settings.yaml` |
+| `security:` | Security fixes/hardening | `security: sanitize user input before prompt injection check` |
+| `remove:` | Delete code/files/features | `remove: drop unused Wikipedia tool wrapper` |
+| `merge:` | Merge commits (usually auto) | `merge: branch 'feature/reranker' into main` |
+| `types:` | Type annotations only | `types: add type hints to retrieval functions` |
+| `lint:` | Linting fixes | `lint: fix ruff warnings in ingestion module` |
+
+---
+
+## 3. AI/ML-Specific Types (used in ML teams — non-standard but practical)
+
+| Prefix | Meaning | Example |
+|---|---|---|
+| `data:` | Dataset changes (add, clean, version) | `data: add 50K Reddit posts, dedupe and clean` |
+| `model:` | Model changes (architecture, weights, checkpoints) | `model: switch reranker to bge-reranker-v2-m3` |
+| `exp:` / `experiment:` | Experiment runs / tracking | `exp: run LoRA r=16 vs r=32 comparison` |
+| `notebook:` / `nb:` | Jupyter notebook changes | `nb: add EDA notebook for anime dataset` |
+| `pipeline:` | Data/ML pipeline changes | `pipeline: add DVC stage for feature extraction` |
+| `train:` | Training script/loop changes | `train: add gradient checkpointing to save VRAM` |
+| `eval:` | Evaluation code/metrics | `eval: add RAGAS faithfulness and recall metrics` |
+| `prompt:` | Prompt template changes | `prompt: rewrite ReAct system prompt for tool use` |
+| `deploy:` | Deployment changes | `deploy: containerize FastAPI app for Cloud Run` |
+| `infra:` | Infrastructure (K8s, Terraform, GCP) | `infra: add GKE autoscaling config` |
+| `monitor:` | Monitoring/observability | `monitor: add LangSmith tracing to agent graph` |
+| `feature-eng:` | Feature engineering | `feature-eng: add TF-IDF features for phishing model` |
+| `tune:` | Hyperparameter tuning | `tune: GridSearchCV over XGBoost params` |
+
+> Note: types in sections 2–3 are conventions, not part of the official spec. If a repo uses commitlint with default rules, only the core types in section 1 will pass. You can extend commitlint config to allow custom types.
+
+---
+
+## 4. Scopes — the `(scope)` part
+
+Scope narrows down *where* the change happened. Very useful in larger projects.
+
+```
+feat(retrieval): add multi-query expansion
+fix(api): handle empty query in /search endpoint
+test(reranker): add cross-encoder scoring tests
+docs(readme): add setup instructions for uv
+data(ingestion): support PDF and DOCX loaders
+perf(embeddings): cache embeddings with Redis
+ci(docker): add multi-stage build
+```
+
+Common scopes for a RAG/ML project:
+`retrieval`, `ingestion`, `embeddings`, `reranker`, `agent`, `api`, `db`, `vectorstore`, `llm`, `prompts`, `eval`, `config`, `docker`, `training`, `preprocessing`, `frontend`, `utils`
+
+---
+
+## 5. Breaking Changes
+
+Two ways to mark a breaking change:
+
+```
+feat(api)!: change /query response schema to include sources
+```
+
+or in the footer:
+
+```
+feat(api): change /query response schema
+
+BREAKING CHANGE: response now returns {answer, sources[]} instead of plain string
+```
+
+The `!` or `BREAKING CHANGE:` footer triggers a MAJOR version bump in semantic-release tooling.
+
+---
+
+## 6. Full Commit Message Anatomy
+
+```
+<type>(<scope>): <subject — imperative, lowercase, no period, ≤72 chars>
+
+<body — optional. Explain WHAT and WHY, not how.
+Wrap at 72 chars.>
+
+<footer — optional. BREAKING CHANGE:, Closes #123, Refs #45>
+```
+
+Example:
+
+```
+feat(retrieval): add cross-encoder reranking stage
+
+Retrieval quality dropped on multi-hop queries. Added a
+bge-reranker-v2-m3 cross-encoder that rescores top-20 dense
+results down to top-5 before generation.
+
+Improves answer faithfulness from 0.71 to 0.84 on eval set.
+
+Closes #12
+```
+
+---
+
+## 7. Rules of Thumb
+
+- Use **imperative mood**: "add", "fix", "update" — not "added" or "adds"
+- Keep the subject **≤ 72 characters**, lowercase after the colon, no trailing period
+- One logical change per commit — if you need "and" in the subject, split it
+- `feat` and `fix` are the only types that affect semantic versioning (minor/patch)
+- When in doubt between `chore` and `build`: dependency/tooling → `build`; everything else routine → `chore`
+- `refactor` must not change behavior — if behavior changes, it's `feat` or `fix`
+
+---
+
+## 8. Quick Decision Guide
+
+```
+New capability users can see?            → feat
+Something was broken, now works?         → fix
+Only README/docstrings/comments?         → docs
+Only tests?                              → test
+Code cleaner, behavior identical?        → refactor
+Same output, faster/cheaper?             → perf
+Only formatting/whitespace?              → style
+Dockerfile, pyproject, requirements?     → build
+GitHub Actions, Jenkins, pipelines?      → ci
+Dataset added/cleaned/versioned?         → data
+Model swap, checkpoint, architecture?    → model
+Prompt template edited?                  → prompt
+Everything else routine?                 → chore
+```

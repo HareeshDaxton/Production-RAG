@@ -39,3 +39,5 @@ htmlcov/
 
 # Claude Code local (personal) settings
 .claude/settings.local.json
+.commit_doc.txt
+commit_doc.txt/
