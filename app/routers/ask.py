@@ -11,4 +11,4 @@ router = APIRouter(prefix="/v1", tags=["ask"])
 
 @router.post("/ask", response_model=AskResponse)
 def ask(req: AskRequest) -> AskResponse:
-    return run_ask(req.query, req.top_k)
+    return run_ask(req.query, req.top_k, req.mode)
