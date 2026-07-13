@@ -12,6 +12,7 @@ from app.logging_config import get_logger
 from app.modules.ingestion.chunker import chunk_document
 from app.modules.ingestion.indexer import index_chunks
 from app.modules.ingestion.loader import load_documents
+from app.modules.retrieval.sparse import rebuild_bm25_index
 
 logger = get_logger(__name__)
 
@@ -40,6 +41,9 @@ def ingest_directory(source_dir: str | Path | None = None, reset: bool = False) 
     docs = load_documents(src)
     chunks = [c for doc in docs for c in chunk_document(doc, cfg.ingestion.chunking)]
     n = index_chunks(chunks)
+
+    # Keep the BM25 sparse index in sync with the dense index (hybrid needs both).
+    rebuild_bm25_index()
 
     record_ingestion(source=str(src), documents=len(docs), chunks=n)
     logger.info(
