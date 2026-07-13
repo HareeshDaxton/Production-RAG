@@ -12,9 +12,21 @@ logger = get_logger(__name__)
 def index_chunks(chunks: list[Chunk]) -> int:
     if not chunks:
         return 0
+    collection = get_chunks_collection()
+
+    # Idempotent re-ingest: drop any prior chunks for these documents first, so
+    # editing/re-running a doc replaces its chunks (and prunes stale ones) rather
+    # than piling up duplicates. Deterministic chunk ids alone would overwrite
+    # position-for-position but leave orphans when a doc shrinks; this handles both.
+    doc_ids = sorted({c.doc_id for c in chunks})
+    try:
+        collection.delete(where={"doc_id": {"$in": doc_ids}})
+    except Exception:  # noqa: BLE001 - empty/absent collection is fine
+        logger.debug("no prior chunks to delete", extra={"docs": len(doc_ids)})
+
     texts = [c.text for c in chunks]
     embeddings = get_embedder().embed_texts(texts)  # document-side (no query prefix)
-    get_chunks_collection().add(
+    collection.add(
         ids=[c.chunk_id for c in chunks],
         embeddings=embeddings,
         documents=texts,

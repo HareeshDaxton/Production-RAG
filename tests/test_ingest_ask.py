@@ -27,6 +27,19 @@ def test_ingest_creates_chunks(ingested):
 
 
 @pytest.mark.slow
+def test_reingest_is_idempotent(ingested):
+    """Re-ingesting the same docs must not duplicate chunks (dedup/upsert)."""
+    from app.clients.vectorstore import get_chunks_collection
+    from app.modules.ingestion.service import ingest_directory
+
+    before = get_chunks_collection().count()
+    again = ingest_directory(SAMPLE_DOCS, reset=False)  # no reset -> relies on dedup
+    after = get_chunks_collection().count()
+    assert after == before
+    assert again.chunks == ingested.chunks
+
+
+@pytest.mark.slow
 def test_dense_retrieval_finds_relevant_doc(ingested):
     from app.modules.retrieval.dense import dense_retrieve
 

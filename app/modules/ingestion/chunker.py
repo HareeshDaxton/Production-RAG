@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from uuid import uuid4
 
 from app.config import ChunkingConfig
 from app.modules.ingestion.loader import Document
@@ -73,7 +72,9 @@ def chunk_document(doc: Document, cfg: ChunkingConfig) -> list[Chunk]:
                 continue
             chunks.append(
                 Chunk(
-                    chunk_id=str(uuid4()),
+                    # Deterministic id (doc + position) so re-ingesting the same
+                    # document overwrites its chunks instead of duplicating them.
+                    chunk_id=f"{doc.doc_id}::{idx}",
                     doc_id=doc.doc_id,
                     source=doc.source,
                     section_path=section_path,
