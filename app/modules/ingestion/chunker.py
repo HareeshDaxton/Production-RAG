@@ -1,8 +1,11 @@
-"""Recursive-by-header chunking (Phase 1 strategy).
+"""Chunking strategies (config-selectable), each tagging its chunks with `strategy`.
 
-Splits a markdown document at its headings into sections, keeping a breadcrumb
-`section_path` for provenance, then token-caps oversized sections with overlap.
-Fixed-size and semantic strategies are added in Phase 2.
+- recursive : split on markdown headings, keep a `section_path` breadcrumb, then token-cap.
+- fixed     : plain token windows with overlap; ignores structure (simple baseline).
+- semantic  : split where the topic shifts — embed sentences, cut when similarity drops.
+
+`chunk_document` dispatches on `cfg.strategy`. Only one strategy is active per ingest;
+the tag lets Phase 4 benchmark all three against the same corpus.
 """
 from __future__ import annotations
 
@@ -14,6 +17,8 @@ from app.modules.ingestion.loader import Document
 from app.utils.tokens import count_tokens, split_by_tokens
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+# Sentence boundary: end punctuation + space, or a blank line.
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n{2,}")
 
 
 @dataclass
@@ -25,6 +30,35 @@ class Chunk:
     chunk_index: int
     text: str
     token_count: int
+    strategy: str
+
+
+def chunk_document(doc: Document, cfg: ChunkingConfig) -> list[Chunk]:
+    if cfg.strategy == "recursive":
+        return _chunk_recursive(doc, cfg)
+    if cfg.strategy == "fixed":
+        return _chunk_fixed(doc, cfg)
+    if cfg.strategy == "semantic":
+        return _chunk_semantic(doc, cfg)
+    raise ValueError(f"unknown chunking strategy: {cfg.strategy!r}")
+
+
+def _make_chunk(doc: Document, section_path: str, idx: int, text: str, strategy: str) -> Chunk:
+    return Chunk(
+        # Deterministic id (doc + position) so re-ingesting the same document
+        # overwrites its chunks instead of duplicating them.
+        chunk_id=f"{doc.doc_id}::{idx}",
+        doc_id=doc.doc_id,
+        source=doc.source,
+        section_path=section_path,
+        chunk_index=idx,
+        text=text,
+        token_count=count_tokens(text),
+        strategy=strategy,
+    )
+
+
+# --- recursive-by-headers ----------------------------------------------------
 
 
 def _split_into_sections(text: str, root_title: str) -> list[tuple[str, str]]:
@@ -62,7 +96,7 @@ def _split_into_sections(text: str, root_title: str) -> list[tuple[str, str]]:
     return sections
 
 
-def chunk_document(doc: Document, cfg: ChunkingConfig) -> list[Chunk]:
+def _chunk_recursive(doc: Document, cfg: ChunkingConfig) -> list[Chunk]:
     chunks: list[Chunk] = []
     idx = 0
     for section_path, content in _split_into_sections(doc.text, doc.title):
@@ -70,18 +104,70 @@ def chunk_document(doc: Document, cfg: ChunkingConfig) -> list[Chunk]:
             piece = piece.strip()
             if len(piece) < cfg.min_chunk_chars:
                 continue
-            chunks.append(
-                Chunk(
-                    # Deterministic id (doc + position) so re-ingesting the same
-                    # document overwrites its chunks instead of duplicating them.
-                    chunk_id=f"{doc.doc_id}::{idx}",
-                    doc_id=doc.doc_id,
-                    source=doc.source,
-                    section_path=section_path,
-                    chunk_index=idx,
-                    text=piece,
-                    token_count=count_tokens(piece),
-                )
-            )
+            chunks.append(_make_chunk(doc, section_path, idx, piece, "recursive"))
+            idx += 1
+    return chunks
+
+
+# --- fixed-size token windows ------------------------------------------------
+
+
+def _chunk_fixed(doc: Document, cfg: ChunkingConfig) -> list[Chunk]:
+    chunks: list[Chunk] = []
+    idx = 0
+    for piece in split_by_tokens(doc.text, cfg.max_chunk_tokens, cfg.overlap_tokens):
+        piece = piece.strip()
+        if len(piece) < cfg.min_chunk_chars:
+            continue
+        chunks.append(_make_chunk(doc, doc.title, idx, piece, "fixed"))
+        idx += 1
+    return chunks
+
+
+# --- semantic (embedding-based) ----------------------------------------------
+
+
+def _split_sentences(text: str) -> list[str]:
+    return [s.strip() for s in _SENT_SPLIT_RE.split(text) if s.strip()]
+
+
+def _chunk_semantic(doc: Document, cfg: ChunkingConfig) -> list[Chunk]:
+    """Group consecutive sentences while they stay on-topic (cosine sim to the
+    running group's mean embedding); cut when similarity drops or the token cap is hit."""
+    import numpy as np
+
+    from app.clients.embeddings import get_embedder
+
+    sentences = _split_sentences(doc.text)
+    if not sentences:
+        return []
+
+    embs = np.array(get_embedder().embed_texts(sentences))  # normalized -> dot = cosine
+
+    groups: list[str] = []
+    cur: list[str] = [sentences[0]]
+    cur_idx: list[int] = [0]
+
+    for i in range(1, len(sentences)):
+        centroid = embs[cur_idx].mean(axis=0)
+        sim = float(centroid @ embs[i] / (np.linalg.norm(centroid) or 1.0))
+        over_cap = count_tokens(" ".join(cur)) >= cfg.max_chunk_tokens
+        if sim < cfg.semantic_threshold or over_cap:
+            groups.append(" ".join(cur))
+            cur, cur_idx = [sentences[i]], [i]
+        else:
+            cur.append(sentences[i])
+            cur_idx.append(i)
+    groups.append(" ".join(cur))
+
+    chunks: list[Chunk] = []
+    idx = 0
+    for group in groups:
+        # Safety token-cap in case a single low-similarity run still ran long.
+        for piece in split_by_tokens(group, cfg.max_chunk_tokens, cfg.overlap_tokens):
+            piece = piece.strip()
+            if len(piece) < cfg.min_chunk_chars:
+                continue
+            chunks.append(_make_chunk(doc, doc.title, idx, piece, "semantic"))
             idx += 1
     return chunks
