@@ -1,6 +1,8 @@
 """Shared API schemas. Grows per phase."""
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -46,6 +48,9 @@ class Citation(BaseModel):
 class AskRequest(BaseModel):
     query: str = Field(..., min_length=3, max_length=2000)
     top_k: int | None = Field(default=None, ge=1, le=20)
+    mode: Literal["hybrid", "dense"] | None = Field(
+        default=None, description="Override retrieval mode; defaults to config (hybrid)."
+    )
 
 
 class AskResponse(BaseModel):
@@ -54,3 +59,5 @@ class AskResponse(BaseModel):
     citations: list[Citation]
     chunks_retrieved: int
     has_sufficient_context: bool
+    retrieval_mode: str
+    retrieval_confidence: float
