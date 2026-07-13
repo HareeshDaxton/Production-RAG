@@ -45,14 +45,21 @@ models:
     temperature: 0.0
 
 retrieval:
-  default_top_k: 5
-  # Hybrid (BM25 + RRF + rerank) settings arrive in Phase 2.
+  default_top_k: 5              # final chunks handed to generation
+  mode: hybrid                  # hybrid (dense+BM25+RRF+rerank) | dense (Phase 1 path). Per-request override via AskRequest.mode
+  dense_candidates: 20          # dense pool size before fusion
+  sparse_candidates: 20         # BM25 pool size before fusion
+  rrf_k: 60                     # Reciprocal Rank Fusion damping constant
+  dense_weight: 1.0             # RRF weight for dense ranking
+  sparse_weight: 1.0            # RRF weight for BM25 ranking
+  rerank_candidates: 20         # fused candidates rescored by the cross-encoder
 
 ingestion:
   corpus:
     dir: data/corpus            # default source for /v1/ingest (populate via scripts/fetch_corpus.py)
   chunking:
-    strategy: recursive         # Phase 1: recursive-by-headers (fixed/semantic added in Phase 2)
+    strategy: recursive         # recursive (by headers) | fixed (token windows) | semantic (embedding-based)
     max_chunk_tokens: 512
     overlap_tokens: 64
     min_chunk_chars: 40
+    semantic_threshold: 0.6     # cosine sim below which the semantic chunker starts a new chunk
