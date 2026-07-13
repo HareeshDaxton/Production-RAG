@@ -37,6 +37,7 @@ def index_chunks(chunks: list[Chunk]) -> int:
                 "section_path": c.section_path,
                 "chunk_index": c.chunk_index,
                 "token_count": c.token_count,
+                "strategy": c.strategy,
             }
             for c in chunks
         ],
