@@ -94,14 +94,22 @@ class ModelsConfig(BaseModel):
 
 
 class RetrievalConfig(BaseModel):
-    default_top_k: int = 5
+    default_top_k: int = 5  # final chunks returned to generation
+    mode: str = "hybrid"  # "hybrid" (dense+BM25+RRF+rerank) or "dense" (Phase 1 path)
+    dense_candidates: int = 20  # pool pulled from the dense index before fusion
+    sparse_candidates: int = 20  # pool pulled from BM25 before fusion
+    rrf_k: int = 60  # RRF damping constant (standard default)
+    dense_weight: float = 1.0  # RRF weight for the dense ranking
+    sparse_weight: float = 1.0  # RRF weight for the BM25 ranking
+    rerank_candidates: int = 20  # fused candidates fed to the cross-encoder reranker
 
 
 class ChunkingConfig(BaseModel):
-    strategy: str = "recursive"  # Phase 1: recursive-by-headers (others in Phase 2)
+    strategy: str = "recursive"  # "recursive" | "fixed" | "semantic"
     max_chunk_tokens: int = 512
     overlap_tokens: int = 64
     min_chunk_chars: int = 40  # drop trivially small fragments
+    semantic_threshold: float = 0.6  # cosine sim below which the semantic chunker cuts
 
 
 class CorpusConfig(BaseModel):
