@@ -66,8 +66,21 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   - Dedup/upsert on re-ingest: chunk ids are deterministic (`{doc_id}::{idx}`) and `index_chunks`
     deletes a doc's prior chunks before re-adding, so re-ingest is idempotent per-doc (no dupes,
     prunes stale chunks). `reset=True` still does a full-collection wipe. Regression test added.
-- **Next: Phase 2** — hybrid retrieval (BM25 + RRF + cross-encoder rerank), 3 switchable chunking
-  strategies, retrieval-confidence scoring.
+- **Phase 2 COMPLETE & validated (15/15 tests green, lint clean).** Hybrid retrieval:
+  `app/modules/retrieval/{sparse,fusion,confidence,hybrid,retriever}.py`. Flow =
+  dense (top `dense_candidates`) + BM25 sparse (top `sparse_candidates`) → **RRF fusion**
+  (config weights, `rrf_k`) → **cross-encoder rerank** (top `rerank_candidates` → `default_top_k`)
+  → **retrieval confidence** (sigmoid of top rerank score; cosine-clamp in dense mode). BM25 index
+  (`rank_bm25`, pickled to `paths.bm25_dir`) is rebuilt from ChromaDB after every ingest (source of
+  truth = the chunk collection). Mode is config-driven (`retrieval.mode: hybrid`) with per-request
+  override `AskRequest.mode` (`hybrid|dense`); `AskResponse` now returns `retrieval_mode` +
+  `retrieval_confidence`. **3 chunking strategies** behind `chunking.strategy`
+  (`recursive` | `fixed` | `semantic`); each chunk tagged with `strategy` in metadata (for the
+  Phase 4 benchmark). Semantic chunker embeds sentences and cuts when cosine sim drops below
+  `semantic_threshold`. Live dense-vs-hybrid demo on `sample_docs`: hybrid gives sharper ranking +
+  confidence 0.999 vs dense 0.773 on a keyword query.
+- **Next: Phase 3** — quality layer (citation verification via judge + composite confidence +
+  graceful IDK below threshold).
 
 ## Update log
 - 2026-07-10: Created. Captured plan pointer, environment, architecture guardrails, conventions, status.
@@ -94,3 +107,14 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   `index_chunks`; `service.ingest_files`). Added `python-multipart` dep + ruff `flake8-bugbear`
   immutable-calls for FastAPI `File/Form/Query/Depends/Body`. New dedup regression test → 9/9 green,
   ruff clean. Fetch script live-verified (3-issue pull ingested to 12 chunks). User commits.
+- 2026-07-13: **Phase 2 COMPLETE.** Hybrid retrieval engine: new
+  `app/modules/retrieval/{sparse,fusion,confidence,hybrid,retriever}.py` (BM25 + RRF + cross-encoder
+  rerank + confidence); `retriever.retrieve(query,k,mode)` dispatches dense|hybrid. BM25 rebuilt from
+  ChromaDB after each ingest (`service.py`), serialized to `paths.bm25_dir`. Chunker refactored into a
+  3-strategy dispatcher (recursive/fixed/semantic) with a `strategy` metadata tag; `index_chunks` now
+  writes it. Config: `retrieval.{mode,dense_candidates,sparse_candidates,rrf_k,dense_weight,
+  sparse_weight,rerank_candidates}` + `chunking.semantic_threshold`. Schemas: `AskRequest.mode`,
+  `AskResponse.{retrieval_mode,retrieval_confidence}`; pipeline + ask router pass mode through. Tests:
+  `tests/test_hybrid_retrieval.py` (fast RRF units + slow sparse/hybrid/dispatch/chunking) → 15/15
+  green, ruff clean. Live dense-vs-hybrid demo verified. NOTE: this work was rebuilt after an
+  accidental IDE "discard all changes" wiped the uncommitted Phase 2 tree. Next = Phase 3.
