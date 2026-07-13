@@ -9,7 +9,8 @@ from app.config import get_config
 from app.logging_config import get_logger
 from app.models.schemas import AskResponse, Citation
 from app.modules.generation.generator import generate_answer
-from app.modules.retrieval.dense import RetrievedChunk, dense_retrieve
+from app.modules.retrieval.dense import RetrievedChunk
+from app.modules.retrieval.retriever import retrieve
 
 logger = get_logger(__name__)
 
@@ -33,9 +34,10 @@ def _to_citations(numbers: list[int], chunks: list[RetrievedChunk]) -> list[Cita
     return citations
 
 
-def ask(query: str, top_k: int | None = None) -> AskResponse:
+def ask(query: str, top_k: int | None = None, mode: str | None = None) -> AskResponse:
     k = top_k or get_config().retrieval.default_top_k
-    chunks = dense_retrieve(query, k)
+    result = retrieve(query, k, mode)
+    chunks = result.chunks
 
     if not chunks:
         return AskResponse(
@@ -44,6 +46,8 @@ def ask(query: str, top_k: int | None = None) -> AskResponse:
             citations=[],
             chunks_retrieved=0,
             has_sufficient_context=False,
+            retrieval_mode=result.mode,
+            retrieval_confidence=result.confidence,
         )
 
     gen = generate_answer(query, chunks)
@@ -53,4 +57,6 @@ def ask(query: str, top_k: int | None = None) -> AskResponse:
         citations=_to_citations(gen.citations_used, chunks),
         chunks_retrieved=len(chunks),
         has_sufficient_context=gen.has_sufficient_context,
+        retrieval_mode=result.mode,
+        retrieval_confidence=result.confidence,
     )
