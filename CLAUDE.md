@@ -56,10 +56,16 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   `sample_docs/` (3 docs → 12 chunks; correct cited answer). SQLite schema now ensured on every
   connection (works for API, tests, scripts). `ingest_directory(reset=True)` clears the collection.
 - Key dep versions (3.13): fastapi 0.139, openai 2.45, instructor 1.15, chromadb 1.5.9,
-  sentence-transformers 5.6, torch 2.13. Embedding = `bge-base-en-v1.5` (768-dim).
-- **Not yet done in Phase 1 (follow-ups):** `scripts/fetch_corpus.py` for the FULL FastAPI docs +
-  GitHub issues corpus (only the small tracked `sample_docs/` is wired so far); file-upload ingest;
-  dedup/upsert on re-ingest (currently `reset=True` to avoid dupes).
+  sentence-transformers 5.6, torch 2.13, python-multipart 0.0.32. Embedding = `bge-base-en-v1.5` (768-dim).
+- **Phase 1 follow-ups COMPLETE (9/9 tests green, lint clean):**
+  - `scripts/fetch_corpus.py` — fetches the FULL FastAPI docs (`docs/en/docs/**/*.md`) + GitHub
+    issues into `data/corpus/{docs,issues}` as front-matter markdown (loader ingests unchanged).
+    CLI: `--docs-only/--issues-only/--max-issues/--repo/--ref/--stats`; honours `GITHUB_TOKEN`.
+    Live-verified (3-issue smoke pull → ingested 3 docs/12 chunks).
+  - File-upload ingest: `POST /v1/ingest/upload` (multipart; markdown only) → temp dir → same pipeline.
+  - Dedup/upsert on re-ingest: chunk ids are deterministic (`{doc_id}::{idx}`) and `index_chunks`
+    deletes a doc's prior chunks before re-adding, so re-ingest is idempotent per-doc (no dupes,
+    prunes stale chunks). `reset=True` still does a full-collection wipe. Regression test added.
 - **Next: Phase 2** — hybrid retrieval (BM25 + RRF + cross-encoder rerank), 3 switchable chunking
   strategies, retrieval-confidence scoring.
 
@@ -82,3 +88,9 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   `ingest_directory` directly, bypassing API startup). Polish: dedupe repeated section-path segments.
   8/8 tests pass, ruff clean, live `/v1/ingest`+`/v1/ask` verified. NOT committed yet (user commits).
   Next = Phase 2.
+- 2026-07-13: **Phase 1 follow-ups COMPLETE** (Phase 1 now fully done). Added `scripts/fetch_corpus.py`
+  (full FastAPI docs + GitHub issues → `data/corpus/`), `POST /v1/ingest/upload` (multipart file
+  upload), and idempotent re-ingest (deterministic chunk ids + per-doc delete-before-add in
+  `index_chunks`; `service.ingest_files`). Added `python-multipart` dep + ruff `flake8-bugbear`
+  immutable-calls for FastAPI `File/Form/Query/Depends/Body`. New dedup regression test → 9/9 green,
+  ruff clean. Fetch script live-verified (3-issue pull ingested to 12 chunks). User commits.
