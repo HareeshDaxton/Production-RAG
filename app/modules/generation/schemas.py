@@ -15,3 +15,10 @@ class GeneratedAnswer(BaseModel):
     has_sufficient_context: bool = Field(
         ..., description="False if the context did not contain enough info to answer."
     )
+    self_confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Your own confidence (0-1) that the answer is correct and fully grounded "
+        "in the context. Be honest: low if you had to stretch or the context was thin.",
+    )
