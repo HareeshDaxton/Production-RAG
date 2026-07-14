@@ -91,8 +91,26 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   `verify_citations: false` skips the judge to save cost. Live-validated: in-corpus →
   confidence 0.999 + verdict=supported; out-of-corpus → IDK at 0.18 (model self-rated 0.9 but
   retrieval/citation 0.0 caught it — the reason to blend signals).
-- **Next: Phase 4** — evaluation harness (hand-labeled golden set + metrics + chunking benchmark;
-  becomes the regression gate for later phases).
+- **Phase 4 COMPLETE & validated (17 tests green — 14 fast + 3 slow, lint clean).** Evaluation
+  harness (the regression gate): `app/modules/eval/{schemas,golden,metrics,runner,report}.py` +
+  `scripts/run_eval.py`. **Golden set** = `eval/golden_set.jsonl` (git-tracked), **20 human-authored
+  cases** over the REAL 154-doc FastAPI corpus (12 simple, 4 multi_hop, 2 ambiguous, 2 no_answer).
+  Corpus fetched via `scripts/fetch_corpus.py --docs-only` → 154 docs → 2112 chunks (recursive).
+  **Metrics** per case: deterministic `retrieval_recall` (expected_sources ⊆ retrieved) +
+  `citation_accuracy` (Phase 3 verdicts) + `idk_accuracy` (no_answer → correctly refused); judge
+  (`models.judge`=gpt-4o-mini, graded vs the HUMAN reference, non-circular) `correctness` +
+  `faithfulness` + `completeness`. Runner persists to SQLite `eval_runs`/`eval_case_results`; report
+  prints a table + **regression deltas vs the previous run** (`eval.regression_tolerance`), plus a
+  3-chunker `render_benchmark` comparison. CLI: `run_eval.py` (single), `--benchmark` (all 3
+  chunkers), `--strategy`, `--limit`. Config: `eval.{golden_path,retrieval_k,regression_tolerance,
+  strategies}`. **Live result** (recursive, gpt-4o-mini answers, 20 cases): overall **0.918**,
+  retrieval_recall 0.925, correctness 0.950, faithfulness 0.975, completeness 0.940,
+  citation_accuracy 0.698, **idk_accuracy 1.000**. Regression gate proven: it flagged the
+  gpt-4o→gpt-4o-mini answer-model downgrade (0.969→0.918). NOTE: `models.generation` was switched to
+  **gpt-4o-mini** to cut eval cost (comment in yaml to bump back to gpt-4o). The 3-chunker benchmark
+  command works but wasn't run on the final set (cost). Golden set is designed to grow toward 50-100+.
+- **Next: Phase 5** — semantic cache (Redis via Docker + query-embedding similarity, conservative
+  threshold, invalidation on re-ingest; the eval harness is now the regression gate).
 
 ## Update log
 - 2026-07-10: Created. Captured plan pointer, environment, architecture guardrails, conventions, status.
@@ -140,3 +158,15 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   prompt got a self_confidence rule. Tests: `tests/test_quality.py` (fast extraction+confidence math;
   slow judge/IDK gated on `.env` key) → 22 total green, ruff clean. Live in-corpus (0.999/supported)
   + out-of-corpus (IDK @ 0.18) verified. User commits. Next = Phase 4.
+- 2026-07-15: **Phase 4 COMPLETE.** Evaluation harness: new `app/modules/eval/{schemas,golden,metrics,
+  runner,report}.py` + `scripts/run_eval.py`; SQLite `eval_runs`/`eval_case_results` (db.py). Fetched
+  the REAL corpus (`fetch_corpus.py --docs-only` → 154 docs/2112 chunks). Authored a human golden set
+  `eval/golden_set.jsonl` (git-tracked) — started at 100 cases, **trimmed to 20 on user request to cut
+  API cost** (12 simple/4 multi_hop/2 ambiguous/2 no_answer). Metrics = deterministic (retrieval_recall,
+  citation_accuracy, idk_accuracy) + judge (correctness/faithfulness/completeness vs the HUMAN
+  reference, gpt-4o-mini). Report = table + regression deltas vs previous run + 3-chunker benchmark
+  table. Switched `models.generation` gpt-4o→**gpt-4o-mini** to cut cost. Live single run (recursive):
+  overall 0.918, idk_accuracy 1.000; regression gate correctly flagged the gpt-4o→mini downgrade.
+  Tests: `tests/test_eval.py` (fast golden/metrics/no_answer scoring; slow end-to-end) → 14 fast green,
+  lint clean. Full 3-chunker benchmark command works but not run on final set (cost). User commits.
+  Next = Phase 5.
