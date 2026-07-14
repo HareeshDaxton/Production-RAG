@@ -124,6 +124,13 @@ class QualityConfig(BaseModel):
     confidence_weights: ConfidenceWeights = ConfidenceWeights()
 
 
+class EvalConfig(BaseModel):
+    golden_path: Path = Path("eval/golden_set.jsonl")  # human-authored answer key (tracked)
+    retrieval_k: int = 5  # top_k used when answering eval questions
+    regression_tolerance: float = 0.03  # overall-score drop beyond this = regression
+    strategies: list[str] = ["recursive", "fixed", "semantic"]  # chunkers to benchmark
+
+
 class CorpusConfig(BaseModel):
     dir: Path = Path("data/corpus")  # default ingest source (populated by fetch script)
 
@@ -140,6 +147,7 @@ class AppConfig(BaseModel):
     retrieval: RetrievalConfig = RetrievalConfig()
     ingestion: IngestionConfig = IngestionConfig()
     quality: QualityConfig = QualityConfig()
+    eval: EvalConfig = EvalConfig()
 
 
 @lru_cache

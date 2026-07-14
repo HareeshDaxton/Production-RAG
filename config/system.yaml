@@ -33,7 +33,7 @@ models:
   # Final grounded answer. API only.
   generation:
     provider: openai
-    name: gpt-4o
+    name: gpt-4o-mini      # cheaper answers for eval/dev; bump to gpt-4o for best quality
     temperature: 0.1
     max_tokens: 1000
     timeout: 30
@@ -71,3 +71,9 @@ quality:                        # Phase 3: citation verification + composite con
     retrieval: 0.4              # Phase 2 retrieval confidence
     citation: 0.4              # fraction of citations the judge supports
     self: 0.2                  # model's own self-reported confidence
+
+eval:                           # Phase 4: evaluation harness (the regression gate)
+  golden_path: eval/golden_set.jsonl   # human-authored answer key (git-tracked)
+  retrieval_k: 5                # top_k used when answering eval questions
+  regression_tolerance: 0.03    # overall-score drop beyond this counts as a regression
+  strategies: [recursive, fixed, semantic]   # chunkers compared by the benchmark

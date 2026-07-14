@@ -29,6 +29,22 @@ CREATE TABLE IF NOT EXISTS ingestion_audit (
     chunks     INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS eval_runs (
+    run_id       TEXT PRIMARY KEY,
+    strategy     TEXT,
+    n_cases      INTEGER,
+    metrics_json TEXT,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS eval_case_results (
+    run_id       TEXT,
+    case_id      TEXT,
+    case_type    TEXT,
+    score        REAL,
+    metrics_json TEXT
+);
 """
 
 
@@ -73,3 +89,35 @@ def record_ingestion(source: str, documents: int, chunks: int) -> None:
             "INSERT INTO ingestion_audit (source, documents, chunks) VALUES (?, ?, ?)",
             (source, documents, chunks),
         )
+
+
+def record_eval_run(
+    run_id: str,
+    strategy: str,
+    n_cases: int,
+    metrics_json: str,
+    case_rows: list[tuple[str, str, float, str]],
+) -> None:
+    """Persist an eval run + its per-case rows (case_id, case_type, score, metrics_json)."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO eval_runs (run_id, strategy, n_cases, metrics_json) "
+            "VALUES (?, ?, ?, ?)",
+            (run_id, strategy, n_cases, metrics_json),
+        )
+        conn.executemany(
+            "INSERT INTO eval_case_results (run_id, case_id, case_type, score, metrics_json) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [(run_id, cid, ctype, score, mj) for (cid, ctype, score, mj) in case_rows],
+        )
+
+
+def get_previous_eval_metrics(strategy: str, before_run_id: str) -> str | None:
+    """Most recent prior run's metrics JSON for a strategy (for regression deltas)."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT metrics_json FROM eval_runs WHERE strategy = ? AND run_id != ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (strategy, before_run_id),
+        ).fetchone()
+    return row["metrics_json"] if row else None
