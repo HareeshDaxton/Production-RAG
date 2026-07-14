@@ -79,8 +79,20 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   Phase 4 benchmark). Semantic chunker embeds sentences and cuts when cosine sim drops below
   `semantic_threshold`. Live dense-vs-hybrid demo on `sample_docs`: hybrid gives sharper ranking +
   confidence 0.999 vs dense 0.773 on a keyword query.
-- **Next: Phase 3** — quality layer (citation verification via judge + composite confidence +
-  graceful IDK below threshold).
+- **Phase 3 COMPLETE & validated (22 tests green — 11 fast + 11 slow, lint clean).** Quality layer:
+  `app/modules/quality/{extractor,verifier,confidence,service}.py`. Flow (in `pipeline.ask`) =
+  generate answer → **extract** inline `[n]` → **verify** each via batched LLM judge
+  (`models.judge` = gpt-4o-mini) → per-citation verdict `supported|partial|unsupported` →
+  **composite confidence** = weighted blend of retrieval conf + citation accuracy + model
+  self-confidence (`quality.confidence_weights`, normalised) → **IDK gate**: below
+  `quality.idk_threshold` (0.45) return a graceful "I don't know" that still lists the closest
+  matches + a suggestion. `GeneratedAnswer` gained `self_confidence`; `AskResponse` gained
+  `confidence` + `confidence_breakdown`; `Citation` gained `verdict` + `verdict_reason`.
+  `verify_citations: false` skips the judge to save cost. Live-validated: in-corpus →
+  confidence 0.999 + verdict=supported; out-of-corpus → IDK at 0.18 (model self-rated 0.9 but
+  retrieval/citation 0.0 caught it — the reason to blend signals).
+- **Next: Phase 4** — evaluation harness (hand-labeled golden set + metrics + chunking benchmark;
+  becomes the regression gate for later phases).
 
 ## Update log
 - 2026-07-10: Created. Captured plan pointer, environment, architecture guardrails, conventions, status.
@@ -118,3 +130,13 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   `tests/test_hybrid_retrieval.py` (fast RRF units + slow sparse/hybrid/dispatch/chunking) → 15/15
   green, ruff clean. Live dense-vs-hybrid demo verified. NOTE: this work was rebuilt after an
   accidental IDE "discard all changes" wiped the uncommitted Phase 2 tree. Next = Phase 3.
+- 2026-07-14: **Phase 3 COMPLETE.** Quality layer: new `app/modules/quality/{extractor,verifier,
+  confidence,service}.py`. `pipeline.ask` now: generate → extract `[n]` → batched judge verify
+  (per-citation `supported|partial|unsupported`) → composite confidence (retrieval + citation
+  accuracy + self-confidence, config weights) → IDK gate below `quality.idk_threshold`. Added
+  `get_judge_client()` (llm.py, reuses instructor client w/ judge model). Config: `quality.{verify_
+  citations,idk_threshold,confidence_weights}`. Schemas: `GeneratedAnswer.self_confidence`,
+  `AskResponse.{confidence,confidence_breakdown}`, `Citation.{verdict,verdict_reason}`; generation
+  prompt got a self_confidence rule. Tests: `tests/test_quality.py` (fast extraction+confidence math;
+  slow judge/IDK gated on `.env` key) → 22 total green, ruff clean. Live in-corpus (0.999/supported)
+  + out-of-corpus (IDK @ 0.18) verified. User commits. Next = Phase 4.
