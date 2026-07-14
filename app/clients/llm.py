@@ -35,6 +35,17 @@ def get_instructor_client():
     return instructor.from_openai(get_openai_client())
 
 
+@lru_cache
+def get_judge_client():
+    """Structured client for the citation-verification / eval judge.
+
+    Currently the same OpenAI+instructor client (judge model set via `models.judge`);
+    named separately so the judge can swap to a local provider (Ollama) without
+    touching call sites.
+    """
+    return get_instructor_client()
+
+
 def simple_generate(prompt: str, model: str | None = None, max_tokens: int = 64) -> str:
     """Minimal unstructured completion — used by the Phase 0 generation smoke test."""
     cfg = get_config().models.generation
