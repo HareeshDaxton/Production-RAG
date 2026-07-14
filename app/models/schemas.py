@@ -43,6 +43,10 @@ class Citation(BaseModel):
     source: str
     section: str | None = None
     text: str
+    verdict: Literal["supported", "partial", "unsupported"] | None = Field(
+        default=None, description="Judge verdict on whether the source backs the claim."
+    )
+    verdict_reason: str | None = None
 
 
 class AskRequest(BaseModel):
@@ -61,3 +65,7 @@ class AskResponse(BaseModel):
     has_sufficient_context: bool
     retrieval_mode: str
     retrieval_confidence: float
+    confidence: float = Field(
+        default=0.0, description="Composite confidence (retrieval + citation + self), 0-1."
+    )
+    confidence_breakdown: dict[str, float] = Field(default_factory=dict)
