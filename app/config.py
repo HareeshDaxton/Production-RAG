@@ -112,6 +112,18 @@ class ChunkingConfig(BaseModel):
     semantic_threshold: float = 0.6  # cosine sim below which the semantic chunker cuts
 
 
+class ConfidenceWeights(BaseModel):
+    retrieval: float = 0.4  # weight of Phase 2 retrieval confidence
+    citation: float = 0.4  # weight of the fraction of citations the judge supports
+    self: float = 0.2  # weight of the model's own self-reported confidence
+
+
+class QualityConfig(BaseModel):
+    verify_citations: bool = True  # run the LLM judge (False = skip to save cost)
+    idk_threshold: float = 0.45  # composite confidence below this → graceful "I don't know"
+    confidence_weights: ConfidenceWeights = ConfidenceWeights()
+
+
 class CorpusConfig(BaseModel):
     dir: Path = Path("data/corpus")  # default ingest source (populated by fetch script)
 
@@ -127,6 +139,7 @@ class AppConfig(BaseModel):
     models: ModelsConfig = ModelsConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
     ingestion: IngestionConfig = IngestionConfig()
+    quality: QualityConfig = QualityConfig()
 
 
 @lru_cache
