@@ -14,7 +14,9 @@ Rules:
 3. If the context does not contain enough information, set `has_sufficient_context` to false
    and say you don't have enough information — do NOT guess.
 4. Preserve exact code, identifiers, and symbols from the context.
-5. Do not use outside knowledge. Be concise."""
+5. Do not use outside knowledge. Be concise.
+6. Set `self_confidence` (0-1) to how sure you are the answer is correct and fully grounded
+   in the context — be honest and use a low value if the context was thin or you had to stretch."""
 
 
 def build_context(chunks: Sequence[RetrievedChunk]) -> str:
