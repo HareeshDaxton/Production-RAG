@@ -63,3 +63,11 @@ ingestion:
     overlap_tokens: 64
     min_chunk_chars: 40
     semantic_threshold: 0.6     # cosine sim below which the semantic chunker starts a new chunk
+
+quality:                        # Phase 3: citation verification + composite confidence + graceful IDK
+  verify_citations: true        # run the LLM judge over citations (false = skip, saves cost)
+  idk_threshold: 0.45           # composite confidence below this → graceful "I don't know"
+  confidence_weights:           # how the 3 signals combine into the composite score (should sum to 1.0)
+    retrieval: 0.4              # Phase 2 retrieval confidence
+    citation: 0.4              # fraction of citations the judge supports
+    self: 0.2                  # model's own self-reported confidence
