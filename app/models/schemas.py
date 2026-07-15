@@ -69,3 +69,7 @@ class AskResponse(BaseModel):
         default=0.0, description="Composite confidence (retrieval + citation + self), 0-1."
     )
     confidence_breakdown: dict[str, float] = Field(default_factory=dict)
+    cached: bool = Field(default=False, description="True if served from the semantic cache.")
+    cache_similarity: float | None = Field(
+        default=None, description="Cosine similarity to the cached query when cached=true."
+    )
