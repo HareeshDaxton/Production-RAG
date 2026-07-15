@@ -112,6 +112,18 @@ def record_eval_run(
         )
 
 
+def get_corpus_version() -> int:
+    """Monotonic corpus version = latest ingestion_audit id (0 if never ingested).
+
+    Every ingest inserts an audit row, so this bumps on each ingest — the semantic
+    cache tags entries with it and only serves matches for the current version, which
+    invalidates stale answers after a re-ingest with no extra bookkeeping.
+    """
+    with get_db() as conn:
+        row = conn.execute("SELECT MAX(audit_id) AS v FROM ingestion_audit").fetchone()
+    return int(row["v"]) if row and row["v"] is not None else 0
+
+
 def get_previous_eval_metrics(strategy: str, before_run_id: str) -> str | None:
     """Most recent prior run's metrics JSON for a strategy (for regression deltas)."""
     with get_db() as conn:

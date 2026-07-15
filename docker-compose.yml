@@ -1,0 +1,21 @@
+# Phase 5: Redis Stack (RediSearch) for the semantic cache.
+# The full service split + Postgres/observability stack lands in Phase 8.
+#   docker compose up -d redis        # start
+#   docker compose down               # stop
+services:
+  redis:
+    image: redis/redis-stack:7.4.0-v3   # Redis + RediSearch (vector search) + RedisInsight
+    container_name: prod-rag-redis
+    ports:
+      - "6380:6379"      # host 6380 → redis (6379 often taken by another project's redis)
+      - "8002:8001"      # RedisInsight UI (optional, http://localhost:8002)
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:

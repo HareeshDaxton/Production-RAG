@@ -131,6 +131,17 @@ class EvalConfig(BaseModel):
     strategies: list[str] = ["recursive", "fixed", "semantic"]  # chunkers to benchmark
 
 
+class CacheConfig(BaseModel):
+    enabled: bool = True  # off, or Redis unreachable → pipeline runs normally (no cache)
+    redis_url: str = "redis://localhost:6379"
+    threshold: float = 0.90  # cosine sim >= this → cache HIT (conservative; paraphrases ~0.90-0.94)
+    near_miss_margin: float = 0.10  # sim in [threshold-margin, threshold) → logged, NOT served
+    ttl_seconds: int = 86400  # entry lifetime (1 day)
+    index_name: str = "rag_cache_idx"
+    key_prefix: str = "cache:"
+    cost_per_answer_usd: float = 0.002  # estimate used for the cost-saved stat
+
+
 class CorpusConfig(BaseModel):
     dir: Path = Path("data/corpus")  # default ingest source (populated by fetch script)
 
@@ -148,6 +159,7 @@ class AppConfig(BaseModel):
     ingestion: IngestionConfig = IngestionConfig()
     quality: QualityConfig = QualityConfig()
     eval: EvalConfig = EvalConfig()
+    cache: CacheConfig = CacheConfig()
 
 
 @lru_cache

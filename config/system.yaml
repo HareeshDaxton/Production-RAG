@@ -77,3 +77,13 @@ eval:                           # Phase 4: evaluation harness (the regression ga
   retrieval_k: 5                # top_k used when answering eval questions
   regression_tolerance: 0.03    # overall-score drop beyond this counts as a regression
   strategies: [recursive, fixed, semantic]   # chunkers compared by the benchmark
+
+cache:                          # Phase 5: semantic cache (Redis Stack / RediSearch)
+  enabled: true                 # false, or Redis down → pipeline runs normally, no cache
+  redis_url: redis://localhost:6380   # docker-compose maps redis-stack to host 6380
+  threshold: 0.90               # cosine sim >= this → cache HIT (bge paraphrases ~0.90-0.94; unrelated ~0.47)
+  near_miss_margin: 0.10        # sim in [0.80, 0.90) logged as near-miss, NOT served
+  ttl_seconds: 86400            # cached entry lifetime (1 day)
+  index_name: rag_cache_idx
+  key_prefix: "cache:"
+  cost_per_answer_usd: 0.002    # estimate used for the cost-saved metric
