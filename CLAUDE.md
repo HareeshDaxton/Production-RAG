@@ -109,8 +109,23 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   gpt-4o→gpt-4o-mini answer-model downgrade (0.969→0.918). NOTE: `models.generation` was switched to
   **gpt-4o-mini** to cut eval cost (comment in yaml to bump back to gpt-4o). The 3-chunker benchmark
   command works but wasn't run on the final set (cost). Golden set is designed to grow toward 50-100+.
-- **Next: Phase 5** — semantic cache (Redis via Docker + query-embedding similarity, conservative
-  threshold, invalidation on re-ingest; the eval harness is now the regression gate).
+- **Phase 5 COMPLETE & validated (19 tests green — 17 fast + 2 slow, lint clean).** Semantic cache:
+  `app/clients/cache.py` (Redis Stack / RediSearch) + `app/modules/cache/service.py`. `pipeline.ask`
+  now: embed query once → **cache lookup** (RediSearch KNN-1, COSINE HNSW, pre-filtered by
+  params-hash + corpus-version) → HIT if sim ≥ `cache.threshold` (**0.90**) returns stored
+  `AskResponse` (`cached=true`, no LLM) → MISS runs full pipeline then **stores** {embedding,
+  params_hash, corpus_version, response, TTL}. **Invalidation** = `corpus_version` = MAX(audit_id)
+  from `ingestion_audit`, so every ingest bumps it and stale entries are never served (zero coupling
+  to Redis). Near-miss band ([0.80,0.90)) logged not served. `AskResponse.{cached,cache_similarity}`;
+  `GET /v1/cache/stats` + `POST /v1/cache/flush`; `scripts/cache_loadtest.py`. **Graceful-degrade**:
+  cache off or Redis down → pipeline runs normally (bounded socket timeouts, never hangs /ask).
+  Infra: `docker-compose.yml` runs `redis/redis-stack` mapped to **host 6380** (6379 was taken by
+  another project). Live demo: cold 26s → exact rerun HIT sim=1.0 190ms → paraphrase HIT sim=0.936
+  195ms → post-reingest MISS (invalidation). NOTE threshold 0.90 chosen from measured bge-base sims
+  (paraphrase ~0.89-0.94, unrelated ~0.47); hit latency ~190ms (query still embedded on CPU), not the
+  plan's <50ms, but ~130x faster than cold.
+- **Next: Phase 6** — auto-eval generation loop (capture low-confidence/IDK/flagged queries → generate
+  reference + labels with double-run agreement → review queue; `POST /v1/feedback`).
 
 ## Update log
 - 2026-07-10: Created. Captured plan pointer, environment, architecture guardrails, conventions, status.
@@ -170,3 +185,15 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   Tests: `tests/test_eval.py` (fast golden/metrics/no_answer scoring; slow end-to-end) → 14 fast green,
   lint clean. Full 3-chunker benchmark command works but not run on final set (cost). User commits.
   Next = Phase 5.
+- 2026-07-16: **Phase 5 COMPLETE.** Semantic cache (Redis Stack / RediSearch): new `app/clients/
+  cache.py`, `app/modules/cache/{__init__,service}.py`, `app/routers/cache.py`, `docker-compose.yml`,
+  `scripts/cache_loadtest.py`, `tests/test_cache.py`. `pipeline.ask` embeds once → RediSearch KNN
+  lookup (COSINE HNSW, filtered by params-hash + corpus-version) → HIT ≥ threshold 0.90 returns stored
+  AskResponse (no LLM), MISS runs pipeline then stores with TTL. Invalidation via corpus_version =
+  MAX(audit_id) (db.get_corpus_version) — every ingest bumps it, no Redis coupling. Added
+  `AskResponse.{cached,cache_similarity}`, `CacheConfig`, `/v1/cache/{stats,flush}`. Graceful-degrade
+  (bounded socket timeouts) so a down Redis never breaks /ask. GOTCHAS fixed: redis-py 8 module is
+  `redis.commands.search.index_definition` (not `indexDefinition`); connect timeout 0.5s too tight for
+  Docker-Windows (→3.0s); host 6379 taken by another project's redis → mapped redis-stack to **6380**.
+  Live: cold 26s → exact HIT 190ms → paraphrase HIT sim=0.936 → post-reingest MISS (invalidation).
+  19 tests green (17 fast + 2 slow), lint clean. User commits. Next = Phase 6.
