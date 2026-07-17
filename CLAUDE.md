@@ -124,8 +124,22 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   195ms → post-reingest MISS (invalidation). NOTE threshold 0.90 chosen from measured bge-base sims
   (paraphrase ~0.89-0.94, unrelated ~0.47); hit latency ~190ms (query still embedded on CPU), not the
   plan's <50ms, but ~130x faster than cold.
-- **Next: Phase 6** — auto-eval generation loop (capture low-confidence/IDK/flagged queries → generate
-  reference + labels with double-run agreement → review queue; `POST /v1/feedback`).
+- **Phase 6 COMPLETE & validated (19 fast tests green, lint clean).** Auto-eval loop:
+  `app/modules/autoeval/{schemas,capture,generator,service}.py` + `app/routers/feedback.py`.
+  `pipeline.ask` (cache miss) → **capture** (cheap DB insert) flags weak answers into SQLite
+  `eval_candidates`: triggers = composite conf < `autoeval.flag_confidence_threshold` (0.6), IDK, or
+  thumbs-down via `POST /v1/feedback`. Separate **process** step (`POST /v1/eval/candidates/process`,
+  gpt-4o-mini) **double-run drafts** a reference (answer+type; sources taken from the real retrieved
+  chunks, not model-written) → runs agree (answer cosine ≥ `agreement_threshold` 0.85 + same type) =
+  `auto_approved`, disagree = `needs_review`, near-dup of a golden question (≥ `dedup_threshold` 0.92)
+  = `rejected_duplicate`. **Review**: `GET /v1/eval/candidates`, `.../{id}/approve` (appends a
+  `GoldenCase` to `eval/candidates.jsonl` — SEPARATE from the hand-authored golden set to protect the
+  spine), `.../{id}/reject`. Human gate always; drafts never auto-join the golden set. Live demo:
+  out-of-corpus query → IDK (conf 0.0006) → captured → drafted `no_answer`/auto_approved → approved to
+  candidates.jsonl. Config: `autoeval.{enabled,flag_confidence_threshold,capture_idk,dedup_threshold,
+  agreement_threshold,candidates_path}`.
+- **Next: Phase 7** — API surface polish + Streamlit dashboard (query UI, citations, confidence,
+  hybrid-vs-dense toggle, cache panel, eval + review-queue views).
 
 ## Update log
 - 2026-07-10: Created. Captured plan pointer, environment, architecture guardrails, conventions, status.
@@ -197,3 +211,12 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   Docker-Windows (→3.0s); host 6379 taken by another project's redis → mapped redis-stack to **6380**.
   Live: cold 26s → exact HIT 190ms → paraphrase HIT sim=0.936 → post-reingest MISS (invalidation).
   19 tests green (17 fast + 2 slow), lint clean. User commits. Next = Phase 6.
+- 2026-07-17: **Phase 6 COMPLETE.** Auto-eval loop: new `app/modules/autoeval/{schemas,capture,
+  generator,service}.py`, `app/routers/feedback.py`, SQLite `eval_candidates`+`feedback` tables +
+  db helpers. `pipeline.ask` calls `capture()` (cheap insert) on cache miss → flags conf<0.6 / IDK;
+  `POST /v1/feedback` thumbs-down also enqueues. `POST /v1/eval/candidates/process` double-run drafts
+  (gpt-4o-mini) → auto_approved/needs_review/rejected_duplicate; approve appends to
+  `eval/candidates.jsonl` (separate from golden_set.jsonl, human-gated). Endpoints:
+  feedback + candidates list/process/approve/reject. Config `autoeval.*`. Tests
+  `tests/test_autoeval.py` (fast flag/enqueue; slow process/approve) → 19 fast green, lint clean.
+  Live demo: IDK query auto-captured → drafted no_answer → approved. User commits. Next = Phase 7.
