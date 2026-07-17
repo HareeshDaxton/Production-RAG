@@ -13,6 +13,7 @@ from app.clients.embeddings import get_embedder
 from app.config import get_config
 from app.logging_config import get_logger
 from app.models.schemas import AskResponse, Citation
+from app.modules.autoeval.capture import capture as capture_candidate
 from app.modules.cache.service import lookup as cache_lookup
 from app.modules.cache.service import store as cache_store
 from app.modules.generation.generator import generate_answer
@@ -145,4 +146,5 @@ def ask(query: str, top_k: int | None = None, mode: str | None = None) -> AskRes
 
     response = _answer(query, k, mode)
     cache_store(query, embedding, k, resolved_mode, response)
+    capture_candidate(query, response)  # flag weak answers for the auto-eval queue (cheap)
     return response
