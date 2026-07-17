@@ -78,6 +78,14 @@ eval:                           # Phase 4: evaluation harness (the regression ga
   regression_tolerance: 0.03    # overall-score drop beyond this counts as a regression
   strategies: [recursive, fixed, semantic]   # chunkers compared by the benchmark
 
+autoeval:                       # Phase 6: capture weak answers → reviewable eval candidates
+  enabled: true
+  flag_confidence_threshold: 0.6  # composite confidence below this enqueues a candidate
+  capture_idk: true               # also capture graceful "I don't know" answers
+  dedup_threshold: 0.92           # question sim >= this to an existing golden case → duplicate
+  agreement_threshold: 0.85       # double-run draft answers sim >= this → runs agree
+  candidates_path: eval/candidates.jsonl   # approved drafts appended here (separate from golden set)
+
 cache:                          # Phase 5: semantic cache (Redis Stack / RediSearch)
   enabled: true                 # false, or Redis down → pipeline runs normally, no cache
   redis_url: redis://localhost:6380   # docker-compose maps redis-stack to host 6380
