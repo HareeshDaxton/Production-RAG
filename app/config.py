@@ -131,6 +131,15 @@ class EvalConfig(BaseModel):
     strategies: list[str] = ["recursive", "fixed", "semantic"]  # chunkers to benchmark
 
 
+class AutoEvalConfig(BaseModel):
+    enabled: bool = True  # capture flagged queries as eval candidates
+    flag_confidence_threshold: float = 0.6  # composite conf below this → candidate
+    capture_idk: bool = True  # also capture graceful-IDK answers
+    dedup_threshold: float = 0.92  # question sim >= this to a golden case → duplicate
+    agreement_threshold: float = 0.85  # double-run answer sim >= this → runs agree
+    candidates_path: Path = Path("eval/candidates.jsonl")  # approved drafts land here
+
+
 class CacheConfig(BaseModel):
     enabled: bool = True  # off, or Redis unreachable → pipeline runs normally (no cache)
     redis_url: str = "redis://localhost:6379"
@@ -160,6 +169,7 @@ class AppConfig(BaseModel):
     quality: QualityConfig = QualityConfig()
     eval: EvalConfig = EvalConfig()
     cache: CacheConfig = CacheConfig()
+    autoeval: AutoEvalConfig = AutoEvalConfig()
 
 
 @lru_cache
