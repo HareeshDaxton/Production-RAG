@@ -45,6 +45,27 @@ CREATE TABLE IF NOT EXISTS eval_case_results (
     score        REAL,
     metrics_json TEXT
 );
+
+CREATE TABLE IF NOT EXISTS eval_candidates (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    query             TEXT NOT NULL,
+    reason            TEXT,
+    retrieved_sources TEXT,
+    proposed_answer   TEXT,
+    proposed_type     TEXT,
+    proposed_sources  TEXT,
+    agreement         INTEGER,
+    status            TEXT DEFAULT 'pending',
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS feedback (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    query      TEXT NOT NULL,
+    rating     TEXT,
+    comment    TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -122,6 +143,57 @@ def get_corpus_version() -> int:
     with get_db() as conn:
         row = conn.execute("SELECT MAX(audit_id) AS v FROM ingestion_audit").fetchone()
     return int(row["v"]) if row and row["v"] is not None else 0
+
+
+def enqueue_candidate(query: str, reason: str, retrieved_sources: str) -> int:
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO eval_candidates (query, reason, retrieved_sources) VALUES (?, ?, ?)",
+            (query, reason, retrieved_sources),
+        )
+        return int(cur.lastrowid)
+
+
+def record_feedback(query: str, rating: str, comment: str | None) -> int:
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO feedback (query, rating, comment) VALUES (?, ?, ?)",
+            (query, rating, comment),
+        )
+        return int(cur.lastrowid)
+
+
+def list_candidates(status: str | None = None, limit: int = 100) -> list[dict]:
+    with get_db() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM eval_candidates WHERE status = ? ORDER BY id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM eval_candidates ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_candidate(candidate_id: int) -> dict | None:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM eval_candidates WHERE id = ?", (candidate_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_candidate(candidate_id: int, **fields) -> None:
+    if not fields:
+        return
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    with get_db() as conn:
+        conn.execute(
+            f"UPDATE eval_candidates SET {cols} WHERE id = ?",
+            (*fields.values(), candidate_id),
+        )
 
 
 def get_previous_eval_metrics(strategy: str, before_run_id: str) -> str | None:
