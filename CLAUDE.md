@@ -138,8 +138,33 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   out-of-corpus query → IDK (conf 0.0006) → captured → drafted `no_answer`/auto_approved → approved to
   candidates.jsonl. Config: `autoeval.{enabled,flag_confidence_threshold,capture_idk,dedup_threshold,
   agreement_threshold,candidates_path}`.
-- **Next: Phase 7** — API surface polish + Streamlit dashboard (query UI, citations, confidence,
-  hybrid-vs-dense toggle, cache panel, eval + review-queue views).
+- **Ingestion-v2 track (multi-format + metadata enrichment + filtered retrieval)** — plan:
+  `C:\Users\hareesh\.claude\plans\ok-now-here-this-peaceful-quail.md`. Six phases (M1–M6) that turn
+  the markdown-only loader into a production ingestion layer: block-based IR, per-chunk metadata
+  enrichment threaded to citations, formats (PDF/DOCX/TXT/MD/HTML/CSV/JSON/XML/**image OCR**), and
+  retrieval-time metadata filtering. **NOTE: this reverses the old "No OCR" guardrail** — OCR is now
+  in-scope for image files + scanned PDF pages only (text PDFs keep native extraction); the guardrail
+  is formally updated in phase M4.
+  - **M1 DONE (code complete; tests not yet run — env rebuild pending, see below).** Block-based IR:
+    `loader.Block` + `Document` gains `file_type/blocks/metadata`; markdown loader emits heading-section
+    blocks (`split_into_sections` moved loader-side). `Chunk` + all 3 chunkers now attribute every chunk
+    to one source block and inherit its metadata (`file_type,title,page_number,locator,content_type,
+    char_count,created_at`) — fixed windows are mapped back to their block via a token→block index so
+    page/section survive *every* strategy. `index_chunks` writes flat-scalar Chroma metadata (omits
+    None). `RetrievedChunk` + `chunk_from_meta` helper carry the new fields through dense/sparse/hybrid
+    (hybrid uses `dataclasses.replace`). `prompt.build_context` renders `From "x" (p.N, Section: …)`;
+    `Citation` gains `file_type/page/locator`, filled in `pipeline._to_citations`. `extractor.py`
+    intentionally unchanged (metadata reaches citations via `RetrievedChunk`, not the extractor). New
+    fast tests in `test_hybrid_retrieval.py` (block-metadata on recursive/fixed) + `test_quality.py`
+    (context shows page/section). All 12 changed files `py_compile` clean.
+  - **Next: run M1 tests once the env is rebuilt, then M2** (loader dispatch + TXT/HTML).
+- **ENVIRONMENT NOTE (2026-07-24):** the Windows reinstall wiped the toolchain — there is **no
+  `.venv` and no `uv`** on the machine (only system Python 3.12 at
+  `C:\Users\hareesh\AppData\Local\Programs\Python\Python312`, without project deps). Rebuild before
+  running/validating: install `uv`, recreate the 3.13 venv, `uv sync`. Until then only `py_compile`
+  static checks are possible.
+- **Phase 7 (deferred, original plan)** — API surface polish + Streamlit dashboard (query UI,
+  citations, confidence, hybrid-vs-dense toggle, cache panel, eval + review-queue views).
 
 ## Update log
 - 2026-07-10: Created. Captured plan pointer, environment, architecture guardrails, conventions, status.

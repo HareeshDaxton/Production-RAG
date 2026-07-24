@@ -38,6 +38,26 @@ def test_extract_drops_out_of_range_markers():
     assert [c.number for c in got] == [1]
 
 
+def test_build_context_shows_page_and_section():
+    from app.modules.generation.prompt import build_context
+
+    chunks = [
+        RetrievedChunk(
+            chunk_id="c1",
+            text="Rate limits use a token bucket.",
+            source="guide.pdf",
+            section_path="Guide > Auth",
+            score=1.0,
+            file_type="pdf",
+            page_number=12,
+        )
+    ]
+    ctx = build_context(chunks)
+    assert 'From "guide.pdf"' in ctx
+    assert "p.12" in ctx
+    assert "Section: Guide > Auth" in ctx
+
+
 # --- fast: confidence math ---------------------------------------------------
 
 

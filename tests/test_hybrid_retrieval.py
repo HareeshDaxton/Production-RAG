@@ -7,7 +7,7 @@ import pytest
 
 from app.config import ChunkingConfig
 from app.modules.ingestion.chunker import chunk_document
-from app.modules.ingestion.loader import Document
+from app.modules.ingestion.loader import Block, Document
 from app.modules.retrieval.fusion import reciprocal_rank_fusion
 
 SAMPLE_DOCS = Path(__file__).resolve().parent.parent / "sample_docs"
@@ -33,6 +33,58 @@ def test_rrf_weight_shifts_ranking():
     # Heavily weighting sparse should put its top item ("y") first.
     fused = reciprocal_rank_fusion([dense, sparse], weights=[0.1, 5.0], k=60)
     assert fused[0][0] == "y"
+
+
+# --- fast: block-based chunking carries per-chunk metadata (no models) --------
+
+
+def _doc_with_blocks() -> Document:
+    return Document(
+        doc_id="guide.md",
+        source="guide.md",
+        title="Guide",
+        file_type="markdown",
+        blocks=[
+            Block(
+                text="Path parameters are declared in the URL path with a type.",
+                section_path="Guide > Path Params",
+                content_type="text",
+            ),
+            Block(
+                text="Query parameters follow a question mark in the request URL.",
+                section_path="Guide > Query Params",
+                content_type="text",
+            ),
+        ],
+        metadata={"created_at": "2026-01-01T00:00:00+00:00"},
+    )
+
+
+def test_recursive_carries_block_metadata():
+    doc = _doc_with_blocks()
+    cfg = ChunkingConfig(
+        strategy="recursive", max_chunk_tokens=64, overlap_tokens=8, min_chunk_chars=1
+    )
+    chunks = chunk_document(doc, cfg)
+    assert chunks
+    assert all(c.file_type == "markdown" and c.title == "Guide" for c in chunks)
+    assert all(c.content_type == "text" for c in chunks)
+    assert all(c.char_count == len(c.text) for c in chunks)
+    assert all(c.created_at == "2026-01-01T00:00:00+00:00" for c in chunks)
+    # recursive respects block boundaries -> section breadcrumbs preserved verbatim
+    assert {c.section_path for c in chunks} == {"Guide > Path Params", "Guide > Query Params"}
+
+
+def test_fixed_attributes_windows_to_source_blocks():
+    doc = _doc_with_blocks()
+    cfg = ChunkingConfig(strategy="fixed", max_chunk_tokens=64, overlap_tokens=8, min_chunk_chars=1)
+    chunks = chunk_document(doc, cfg)
+    assert chunks
+    assert all(c.strategy == "fixed" and c.file_type == "markdown" for c in chunks)
+    # every window is attributed back to a real block's section breadcrumb
+    assert all(
+        c.section_path in {"Guide > Path Params", "Guide > Query Params"} for c in chunks
+    )
 
 
 # --- slow: real retrieval over the sample corpus -----------------------------
@@ -93,3 +145,6 @@ def test_chunking_strategies_tag_their_chunks(ingested):
         assert chunks, f"{strategy} produced no chunks"
         assert all(c.strategy == strategy for c in chunks)
         assert all(c.chunk_id == f"t.md::{c.chunk_index}" for c in chunks)
+        # every chunk carries enrichment metadata regardless of strategy
+        assert all(c.char_count == len(c.text) and c.content_type for c in chunks)
+        assert all(c.section_path for c in chunks)
