@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.models.schemas import IngestRequest, IngestResponse
-from app.modules.ingestion.loader import MARKDOWN_SUFFIXES
+from app.modules.ingestion.loader import allowed_suffixes
 from app.modules.ingestion.service import ingest_directory, ingest_files
 
 router = APIRouter(prefix="/v1", tags=["ingest"])
@@ -27,16 +27,17 @@ def ingest(req: IngestRequest) -> IngestResponse:
 
 @router.post("/ingest/upload", response_model=IngestResponse)
 async def ingest_upload(
-    files: list[UploadFile] = File(..., description="Markdown files to ingest."),
+    files: list[UploadFile] = File(..., description="Documents to ingest (see accepted types)."),
     reset: bool = Form(default=False, description="Wipe the collection before ingesting."),
 ) -> IngestResponse:
+    allowed = allowed_suffixes()
     payloads: list[tuple[str, bytes]] = []
     for f in files:
-        name = f.filename or "upload.md"
-        if Path(name).suffix.lower() not in MARKDOWN_SUFFIXES:
+        name = f.filename or "upload"
+        if Path(name).suffix.lower() not in allowed:
             raise HTTPException(
                 status_code=400,
-                detail=f"unsupported file type: {name} (only markdown is accepted)",
+                detail=f"unsupported file type: {name}. accepted extensions: {sorted(allowed)}",
             )
         payloads.append((name, await f.read()))
 
