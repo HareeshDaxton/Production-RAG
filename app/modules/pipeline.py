@@ -50,6 +50,9 @@ def _to_citations(
                     source=c.source,
                     section=c.section_path,
                     text=_snippet(c.text),
+                    file_type=c.file_type or None,
+                    page=c.page_number,
+                    locator=c.locator,
                     verdict=v.verdict if v else None,
                     verdict_reason=v.reason if v else None,
                 )
