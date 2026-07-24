@@ -170,8 +170,21 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
     lists accepted extensions). Adding a format = drop a module in `loaders/` + `@register` — no
     dispatcher change. Tests: `tests/test_loaders.py` (fast, no models/chroma) + fixtures under
     `tests/fixtures/multiformat/`. **No new deps** (bs4/lxml already installed).
-  - **Next: M3** — PDF (PyMuPDF, per-page blocks) + DOCX (heading-style sections); adds `pymupdf` +
-    `python-docx`.
+  - **M3 DONE & validated (ruff clean, 28 fast tests pass — +4 for pdf/docx).** PDF + DOCX loaders:
+    `loaders/pdf.py` (PyMuPDF/`fitz`: **one Block per page** with 1-based `page`, native text
+    extraction; doc metadata `page_count`+`has_scanned_pages`) and `loaders/docx.py` (python-docx:
+    heading styles → `section_path` breadcrumb Blocks like markdown/html; tables → pipe-joined
+    `content_type="table"` Blocks; `.doc` legacy binary NOT supported). **Scanned-page detection:** a
+    PDF page with < `formats.pdf.scanned_text_density_threshold` (100) chars of extractable text is
+    flagged `content_type="scanned"` with empty text (dropped by the chunker's `min_chunk_chars`
+    gate) and `has_scanned_pages=True` — **actual OCR is deferred to M4**; M3 never crashes on scanned
+    input. Config: `formats.enabled` += `pdf,docx`; new `PdfFormatConfig.scanned_text_density_threshold`.
+    Deps added: `pymupdf 1.28.0` + `python-docx 1.2.0`. Loaders register via `@register`; no
+    dispatcher change (block IR from M1 already threads page/section → citations). Binary fixtures
+    (`sample.pdf`, `scanned.pdf`, `sample.docx`) generated with the libs, committed under
+    `tests/fixtures/multiformat/`; fast tests in `tests/test_loaders.py`.
+  - **Next: M4** — OCR for images + scanned PDF pages (`pillow` + `easyocr`, config-selectable
+    engine); fills the `scanned`-flagged blocks + adds `loaders/image.py`.
 - **ENVIRONMENT NOTE (2026-07-24):** post-reinstall the venv/uv were rebuilt by the user; `uv` lives at
   `C:\Users\hareesh\AppData\Local\Programs\Python\Python312\Scripts\uv.exe` (not on PATH). The earlier
   ChromaDB native-DLL load failure (missing MSVC runtime) is **resolved** — the full fast suite incl.
@@ -249,6 +262,17 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   Docker-Windows (→3.0s); host 6379 taken by another project's redis → mapped redis-stack to **6380**.
   Live: cold 26s → exact HIT 190ms → paraphrase HIT sim=0.936 → post-reingest MISS (invalidation).
   19 tests green (17 fast + 2 slow), lint clean. User commits. Next = Phase 6.
+- 2026-07-24: **Ingestion-v2 M3 COMPLETE.** PDF + DOCX loaders. New `app/modules/ingestion/loaders/
+  {pdf,docx}.py`: PDF (PyMuPDF) emits one Block per page (1-based `page`, native text extraction,
+  doc metadata `page_count`/`has_scanned_pages`) with scanned-page detection (text density <
+  `formats.pdf.scanned_text_density_threshold`=100 → `content_type="scanned"`, empty text, flagged
+  for M4 OCR); DOCX (python-docx) maps heading styles → `section_path` Blocks + tables →
+  `content_type="table"` Blocks. Registered in `loaders/__init__.py`; added `PdfFormatConfig` +
+  enabled `pdf,docx` in `config.py`/`system.yaml`. Deps: `pymupdf 1.28.0`, `python-docx 1.2.0` (via
+  `uv add`). Fixtures `tests/fixtures/multiformat/{sample.pdf,scanned.pdf,sample.docx}` +
+  `tests/test_loaders.py` cases (per-page blocks, scanned flagging, heading/table, dispatch). Ruff
+  clean, 28 fast tests green. Block IR from M1 threads page/section straight to citations — no
+  chunker/retrieval/prompt changes needed. Next = M4 (OCR). User commits.
 - 2026-07-17: **Phase 6 COMPLETE.** Auto-eval loop: new `app/modules/autoeval/{schemas,capture,
   generator,service}.py`, `app/routers/feedback.py`, SQLite `eval_candidates`+`feedback` tables +
   db helpers. `pipeline.ask` calls `capture()` (cheap insert) on cache miss → flags conf<0.6 / IDK;
