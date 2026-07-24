@@ -19,9 +19,19 @@ Rules:
    in the context — be honest and use a low value if the context was thin or you had to stretch."""
 
 
+def _locator(c: RetrievedChunk) -> str:
+    """Human-readable provenance suffix: page and/or section, when known."""
+    parts: list[str] = []
+    if c.page_number is not None:
+        parts.append(f"p.{c.page_number}")
+    if c.section_path:
+        parts.append(f"Section: {c.section_path}")
+    return f" ({', '.join(parts)})" if parts else ""
+
+
 def build_context(chunks: Sequence[RetrievedChunk]) -> str:
     blocks = [
-        f'[{i}] From "{c.source}" (Section: {c.section_path})\n{c.text}'
+        f'[{i}] From "{c.source}"{_locator(c)}\n{c.text}'
         for i, c in enumerate(chunks, start=1)
     ]
     return "\n\n".join(blocks)
