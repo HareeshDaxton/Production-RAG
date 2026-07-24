@@ -16,6 +16,14 @@ def count_tokens(text: str) -> int:
     return len(_encoder().encode(text))
 
 
+def encode_tokens(text: str) -> list[int]:
+    return _encoder().encode(text)
+
+
+def decode_tokens(ids: list[int]) -> str:
+    return _encoder().decode(ids)
+
+
 def split_by_tokens(text: str, max_tokens: int, overlap: int) -> list[str]:
     """Split raw text into token windows of <= max_tokens with `overlap` token overlap."""
     enc = _encoder()
