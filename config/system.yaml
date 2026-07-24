@@ -58,7 +58,9 @@ ingestion:
   corpus:
     dir: data/corpus            # default source for /v1/ingest (populate via scripts/fetch_corpus.py)
   formats:
-    enabled: [markdown, txt, html]   # accepted file types (grows per phase: +pdf/docx, +image, +csv/json/xml)
+    enabled: [markdown, txt, html, pdf, docx]   # accepted file types (grows per phase: +image, +csv/json/xml)
+    pdf:
+      scanned_text_density_threshold: 100   # chars/page below this → treat page as scanned (OCR handled in M4)
   chunking:
     strategy: recursive         # recursive (by headers) | fixed (token windows) | semantic (embedding-based)
     max_chunk_tokens: 512

@@ -155,10 +155,17 @@ class CorpusConfig(BaseModel):
     dir: Path = Path("data/corpus")  # default ingest source (populated by fetch script)
 
 
+class PdfFormatConfig(BaseModel):
+    # Chars of extractable text per page below this → treat the page as scanned.
+    # M3 flags such pages; M4 OCRs them. Text-based PDFs use native extraction.
+    scanned_text_density_threshold: int = 100
+
+
 class FormatsConfig(BaseModel):
     # Formats accepted on ingest/upload. Grows one entry per phase as loaders land
     # (M2: markdown/txt/html; M3: +pdf/docx; M4: +image; M5: +csv/json/xml).
-    enabled: list[str] = ["markdown", "txt", "html"]
+    enabled: list[str] = ["markdown", "txt", "html", "pdf", "docx"]
+    pdf: PdfFormatConfig = PdfFormatConfig()
 
 
 class IngestionConfig(BaseModel):
