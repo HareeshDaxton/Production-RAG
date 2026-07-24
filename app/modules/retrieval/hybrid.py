@@ -12,6 +12,8 @@ generation is unchanged; only ranking quality improves.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 from app.clients.reranker import get_reranker
 from app.config import get_config
 from app.logging_config import get_logger
@@ -47,16 +49,8 @@ def hybrid_retrieve(query: str, top_k: int) -> tuple[list[RetrievedChunk], float
     candidates = [(cid, pool[cid].text) for cid in candidate_ids]
 
     reranked = get_reranker().rerank(query, candidates, top_k)  # [(id, score)] desc
-    results = [
-        RetrievedChunk(
-            chunk_id=cid,
-            text=pool[cid].text,
-            source=pool[cid].source,
-            section_path=pool[cid].section_path,
-            score=score,  # cross-encoder relevance score
-        )
-        for cid, score in reranked
-    ]
+    # Carry all per-chunk metadata forward; only the score changes (cross-encoder relevance).
+    results = [replace(pool[cid], score=score) for cid, score in reranked]
     confidence = retrieval_confidence([s for _, s in reranked], kind="cross_encoder")
     logger.info(
         "hybrid retrieval",

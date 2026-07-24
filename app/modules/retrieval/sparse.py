@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from app.clients.vectorstore import get_chunks_collection
 from app.config import get_config
 from app.logging_config import get_logger
-from app.modules.retrieval.dense import RetrievedChunk
+from app.modules.retrieval.dense import RetrievedChunk, chunk_from_meta
 
 logger = get_logger(__name__)
 
@@ -47,15 +47,9 @@ class BM25Index:
         for i in ranked[:top_k]:
             if scores[i] <= 0:  # no term overlap -> not a real match
                 continue
-            meta = self.metadatas[i] or {}
             hits.append(
-                RetrievedChunk(
-                    chunk_id=self.ids[i],
-                    text=self.texts[i],
-                    source=meta.get("source", ""),
-                    section_path=meta.get("section_path", ""),
-                    score=float(scores[i]),  # raw BM25 score (fusion uses rank, not value)
-                )
+                # raw BM25 score (fusion uses rank, not value)
+                chunk_from_meta(self.ids[i], self.texts[i], self.metadatas[i], float(scores[i]))
             )
         return hits
 
