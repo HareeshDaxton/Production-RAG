@@ -57,6 +57,8 @@ retrieval:
 ingestion:
   corpus:
     dir: data/corpus            # default source for /v1/ingest (populate via scripts/fetch_corpus.py)
+  formats:
+    enabled: [markdown, txt, html]   # accepted file types (grows per phase: +pdf/docx, +image, +csv/json/xml)
   chunking:
     strategy: recursive         # recursive (by headers) | fixed (token windows) | semantic (embedding-based)
     max_chunk_tokens: 512

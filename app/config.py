@@ -155,9 +155,16 @@ class CorpusConfig(BaseModel):
     dir: Path = Path("data/corpus")  # default ingest source (populated by fetch script)
 
 
+class FormatsConfig(BaseModel):
+    # Formats accepted on ingest/upload. Grows one entry per phase as loaders land
+    # (M2: markdown/txt/html; M3: +pdf/docx; M4: +image; M5: +csv/json/xml).
+    enabled: list[str] = ["markdown", "txt", "html"]
+
+
 class IngestionConfig(BaseModel):
     corpus: CorpusConfig = CorpusConfig()
     chunking: ChunkingConfig = ChunkingConfig()
+    formats: FormatsConfig = FormatsConfig()
 
 
 class AppConfig(BaseModel):
