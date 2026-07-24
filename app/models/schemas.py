@@ -43,6 +43,12 @@ class Citation(BaseModel):
     source: str
     section: str | None = None
     text: str
+    file_type: str | None = None
+    page: int | None = Field(default=None, description="Page number for paginated sources (PDF).")
+    locator: str | None = Field(
+        default=None,
+        description="Structural pointer for non-paginated sources (row/object/element).",
+    )
     verdict: Literal["supported", "partial", "unsupported"] | None = Field(
         default=None, description="Judge verdict on whether the source backs the claim."
     )
