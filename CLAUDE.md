@@ -145,7 +145,7 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   retrieval-time metadata filtering. **NOTE: this reverses the old "No OCR" guardrail** — OCR is now
   in-scope for image files + scanned PDF pages only (text PDFs keep native extraction); the guardrail
   is formally updated in phase M4.
-  - **M1 DONE (code complete; tests not yet run — env rebuild pending, see below).** Block-based IR:
+  - **M1 DONE & validated (committed + pushed; ruff clean, fast tests green).** Block-based IR:
     `loader.Block` + `Document` gains `file_type/blocks/metadata`; markdown loader emits heading-section
     blocks (`split_into_sections` moved loader-side). `Chunk` + all 3 chunkers now attribute every chunk
     to one source block and inherit its metadata (`file_type,title,page_number,locator,content_type,
@@ -156,13 +156,26 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
     `Citation` gains `file_type/page/locator`, filled in `pipeline._to_citations`. `extractor.py`
     intentionally unchanged (metadata reaches citations via `RetrievedChunk`, not the extractor). New
     fast tests in `test_hybrid_retrieval.py` (block-metadata on recursive/fixed) + `test_quality.py`
-    (context shows page/section). All 12 changed files `py_compile` clean.
-  - **Next: run M1 tests once the env is rebuilt, then M2** (loader dispatch + TXT/HTML).
-- **ENVIRONMENT NOTE (2026-07-24):** the Windows reinstall wiped the toolchain — there is **no
-  `.venv` and no `uv`** on the machine (only system Python 3.12 at
-  `C:\Users\hareesh\AppData\Local\Programs\Python\Python312`, without project deps). Rebuild before
-  running/validating: install `uv`, recreate the 3.13 venv, `uv sync`. Until then only `py_compile`
-  static checks are possible.
+    (context shows page/section).
+  - **M2 DONE & validated (ruff clean, 24 fast tests pass).** Multi-format loader dispatch:
+    new `app/modules/ingestion/loaders/` package — `base.py` (moved `Block`/`Document`, a
+    suffix→`(format,loader)` `REGISTRY` + `@register` decorator, shared helpers
+    `blocks_from_sections`/`read_text`/`iso_mtime`/`filename_title`), `markdown.py` (moved; identical
+    behaviour), `text.py` (single block), `html.py` (BeautifulSoup+lxml: strips
+    script/style/nav/header/footer/aside/form, walks h1..h6 into the same heading-breadcrumb sections
+    as markdown). `loader.py` is now a thin facade: re-exports `Block`/`Document`/`MARKDOWN_SUFFIXES`
+    (back-compat) and holds `load_documents(dir, enabled=None)` + `allowed_suffixes()`, both honoring
+    the config allowlist. Config: `ingestion.formats.enabled` (`FormatsConfig`; M2 = `[markdown,txt,
+    html]`, grows per phase). Router `/v1/ingest/upload` now gates on `allowed_suffixes()` (message
+    lists accepted extensions). Adding a format = drop a module in `loaders/` + `@register` — no
+    dispatcher change. Tests: `tests/test_loaders.py` (fast, no models/chroma) + fixtures under
+    `tests/fixtures/multiformat/`. **No new deps** (bs4/lxml already installed).
+  - **Next: M3** — PDF (PyMuPDF, per-page blocks) + DOCX (heading-style sections); adds `pymupdf` +
+    `python-docx`.
+- **ENVIRONMENT NOTE (2026-07-24):** post-reinstall the venv/uv were rebuilt by the user; `uv` lives at
+  `C:\Users\hareesh\AppData\Local\Programs\Python\Python312\Scripts\uv.exe` (not on PATH). The earlier
+  ChromaDB native-DLL load failure (missing MSVC runtime) is **resolved** — the full fast suite incl.
+  `test_ready_endpoint` is green.
 - **Phase 7 (deferred, original plan)** — API surface polish + Streamlit dashboard (query UI,
   citations, confidence, hybrid-vs-dense toggle, cache panel, eval + review-queue views).
 
