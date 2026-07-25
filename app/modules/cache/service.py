@@ -8,6 +8,7 @@ loose cache serves subtly-wrong answers, which is worse than a cache miss.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 
 from app.clients.cache import get_cache_client
@@ -15,6 +16,7 @@ from app.clients.db import get_corpus_version
 from app.config import get_config
 from app.logging_config import get_logger
 from app.models.schemas import AskResponse
+from app.modules.retrieval.filters import Filters
 
 logger = get_logger(__name__)
 
@@ -26,8 +28,19 @@ class CacheLookup:
     response: AskResponse | None
 
 
-def params_hash(top_k: int, mode: str) -> str:
-    """Stable hash of everything that changes the answer besides the query text."""
+def _filters_key(filters: Filters | None) -> str:
+    """Canonical (order-independent) string for the active filters."""
+    if not filters:
+        return ""
+    return json.dumps(filters, sort_keys=True, separators=(",", ":"))
+
+
+def params_hash(top_k: int, mode: str, filters: Filters | None = None) -> str:
+    """Stable hash of everything that changes the answer besides the query text.
+
+    Filters are part of the key: a filtered query must never be served an answer
+    that was cached for the unfiltered (or differently-filtered) version.
+    """
     cfg = get_config()
     parts = "|".join(
         str(x)
@@ -36,19 +49,26 @@ def params_hash(top_k: int, mode: str) -> str:
             mode,
             cfg.models.generation.name,
             cfg.quality.verify_citations,
+            _filters_key(filters),
         )
     )
     return hashlib.sha1(parts.encode()).hexdigest()[:16]
 
 
-def lookup(query: str, embedding: list[float], top_k: int, mode: str) -> CacheLookup:
+def lookup(
+    query: str,
+    embedding: list[float],
+    top_k: int,
+    mode: str,
+    filters: Filters | None = None,
+) -> CacheLookup:
     """Check the cache. HIT only when similarity >= threshold; near-misses logged, not served."""
     client = get_cache_client()
     if not client.available():
         return CacheLookup(hit=False, similarity=0.0, response=None)
 
     cfg = get_config().cache
-    ph = params_hash(top_k, mode)
+    ph = params_hash(top_k, mode, filters)
     cv = str(get_corpus_version())
     found = client.search(embedding, ph, cv)
 
@@ -73,11 +93,18 @@ def lookup(query: str, embedding: list[float], top_k: int, mode: str) -> CacheLo
     return CacheLookup(hit=False, similarity=similarity, response=None)
 
 
-def store(query: str, embedding: list[float], top_k: int, mode: str, response: AskResponse) -> None:
+def store(
+    query: str,
+    embedding: list[float],
+    top_k: int,
+    mode: str,
+    response: AskResponse,
+    filters: Filters | None = None,
+) -> None:
     client = get_cache_client()
     if not client.available():
         return
-    ph = params_hash(top_k, mode)
+    ph = params_hash(top_k, mode, filters)
     cv = str(get_corpus_version())
     # Persist the un-cached form so a later hit reports cached=true, not the stored value.
     to_store = response.model_copy(update={"cached": False, "cache_similarity": None})
