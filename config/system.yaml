@@ -58,9 +58,14 @@ ingestion:
   corpus:
     dir: data/corpus            # default source for /v1/ingest (populate via scripts/fetch_corpus.py)
   formats:
-    enabled: [markdown, txt, html, pdf, docx]   # accepted file types (grows per phase: +image, +csv/json/xml)
+    enabled: [markdown, txt, html, pdf, docx, image]   # accepted file types (grows per phase: +csv/json/xml)
     pdf:
-      scanned_text_density_threshold: 100   # chars/page below this → treat page as scanned (OCR handled in M4)
+      scanned_text_density_threshold: 100   # chars/page below this → treat page as scanned (OCR'd via M4)
+    ocr:                          # OCR runs only for image files + scanned PDF pages
+      enabled: true               # false/unavailable → scanned content skipped gracefully (never crashes)
+      engine: easyocr             # easyocr (no system binary, ~90MB models on first use) | tesseract
+      languages: [en]
+      dpi: 200                    # render resolution for scanned PDF pages before OCR
   chunking:
     strategy: recursive         # recursive (by headers) | fixed (token windows) | semantic (embedding-based)
     max_chunk_tokens: 512

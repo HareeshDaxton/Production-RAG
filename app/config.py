@@ -161,11 +161,20 @@ class PdfFormatConfig(BaseModel):
     scanned_text_density_threshold: int = 100
 
 
+class OcrConfig(BaseModel):
+    # OCR runs only for image files + scanned PDF pages. Off/unavailable → graceful skip.
+    enabled: bool = True
+    engine: str = "easyocr"  # easyocr (default, no system binary) | tesseract
+    languages: list[str] = ["en"]
+    dpi: int = 200  # render resolution for scanned PDF pages before OCR
+
+
 class FormatsConfig(BaseModel):
     # Formats accepted on ingest/upload. Grows one entry per phase as loaders land
     # (M2: markdown/txt/html; M3: +pdf/docx; M4: +image; M5: +csv/json/xml).
-    enabled: list[str] = ["markdown", "txt", "html", "pdf", "docx"]
+    enabled: list[str] = ["markdown", "txt", "html", "pdf", "docx", "image"]
     pdf: PdfFormatConfig = PdfFormatConfig()
+    ocr: OcrConfig = OcrConfig()
 
 
 class IngestionConfig(BaseModel):
