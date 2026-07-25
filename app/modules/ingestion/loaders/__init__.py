@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.modules.ingestion.loaders import (  # noqa: F401
     docx,
     html,
+    image,
     markdown,
     pdf,
     text,
