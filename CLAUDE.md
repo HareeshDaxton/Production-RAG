@@ -222,9 +222,22 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
     in `test_loaders.py` (row/object/element locators, header prepend, rows_per_chunk split,
     structured passthrough, dispatch). NOTE: for csv/json/xml the `chunking.strategy` setting is
     intentionally ignored — file_type wins.
-  - **Next: M6** — metadata-filtered retrieval (`AskRequest.filters` on file_type/source → dense
-    `where` + sparse post-filter + hybrid pre-fusion filter; **cache params-hash must include
-    filters**).
+  - **M6 DONE & validated (ruff clean, 48 fast tests pass — +9 for filtering/cache).** Metadata-
+    filtered retrieval — **final phase; ingestion-v2 track COMPLETE.** New `AskRequest.filters`
+    (`RetrievalFilters`, `extra="forbid"` so typos 400): equality on `file_type` / `source` /
+    `content_type`. New `app/modules/retrieval/filters.py`: `build_where` (None→no filter; 1 key→flat;
+    N keys→`$and`, Chroma's required combinator) + `metadata_matches` (Python equality for sparse).
+    Threaded as `filters: dict|None` (default None, so every existing call site is unchanged) through
+    `dense_retrieve` (Chroma `where=`), `BM25Index.search`/`sparse_retrieve` (post-filter then top_k),
+    `hybrid_retrieve` (both retrievers filtered at source → fused pool/rerank only see matches),
+    `retrieve`, `pipeline._answer`/`ask`, `routers/ask.py`. **Cache correctness fix**: `params_hash`
+    now folds in a canonical (order-independent) filters key, and `lookup`/`store` take `filters` — so
+    a filtered query can never be served an unfiltered (or differently-filtered) cached answer. Empty
+    filtered result → existing graceful IDK. **Design note**: equality only — Chroma metadata `where`
+    has no substring op, so `section`-substring filtering is intentionally out of scope (documented,
+    not half-built). No new deps/infra. Tests `tests/test_retrieval_filters.py` (where-shapes,
+    match, BM25 post-filter+top_k, filtered≠unfiltered≠different-filter cache hashes, order-stable
+    hash, extra-key rejection).
 - **ENVIRONMENT NOTE (2026-07-24):** post-reinstall the venv/uv were rebuilt by the user; `uv` lives at
   `C:\Users\hareesh\AppData\Local\Programs\Python\Python312\Scripts\uv.exe` (not on PATH). The earlier
   ChromaDB native-DLL load failure (missing MSVC runtime) is **resolved** — the full fast suite incl.
@@ -302,6 +315,18 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   Docker-Windows (→3.0s); host 6379 taken by another project's redis → mapped redis-stack to **6380**.
   Live: cold 26s → exact HIT 190ms → paraphrase HIT sim=0.936 → post-reingest MISS (invalidation).
   19 tests green (17 fast + 2 slow), lint clean. User commits. Next = Phase 6.
+- 2026-07-25: **Ingestion-v2 M6 COMPLETE — track finished.** Metadata-filtered retrieval.
+  `AskRequest.filters` (`RetrievalFilters`, equality on file_type/source/content_type, unknown keys
+  rejected). New `app/modules/retrieval/filters.py` (`build_where` → Chroma `where` incl. `$and`;
+  `metadata_matches` → sparse Python filter). Filters threaded (default None) through
+  dense/sparse/hybrid/`retrieve`/pipeline/`routers/ask.py`; hybrid filters both retrievers at source.
+  **Cache fix**: `params_hash` + `lookup`/`store` now include a canonical filters key so filtered
+  queries never hit unfiltered cached answers. Equality-only by design (Chroma has no metadata
+  substring op → section-substring deferred). No new deps. Tests `tests/test_retrieval_filters.py`
+  (9 fast). Ruff clean, 48 fast tests green. **Ingestion-v2 (M1–M6) is now 100% complete**: block IR
+  → 9 formats (md/txt/html/pdf/docx/image-OCR/csv/json/xml) → per-chunk metadata → citations →
+  filtered retrieval. Remaining project work = deferred original Phase 7 (Streamlit dashboard/API
+  polish) + Phase 8 (service split + Postgres/pgvector). User commits.
 - 2026-07-25: **Ingestion-v2 M5 COMPLETE.** Structured formats (CSV/JSON/XML) + a `structured`
   chunker. New `loaders/{csv,json,xml}.py`: CSV groups rows (header prepended, `locator="rows a-b"`,
   `content_type="row"`); JSON → one block per top-level element (`$[i]`/`$.key`, `content_type=
