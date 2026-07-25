@@ -5,16 +5,21 @@ from pathlib import Path
 
 import pytest
 
+from app.config import ChunkingConfig
+from app.modules.ingestion.chunker import chunk_document
 from app.modules.ingestion.loader import (
     REGISTRY,
     allowed_suffixes,
     load_documents,
 )
+from app.modules.ingestion.loaders import csv as csv_loader
 from app.modules.ingestion.loaders import docx as docx_loader
 from app.modules.ingestion.loaders import html as html_loader
 from app.modules.ingestion.loaders import image as image_loader
+from app.modules.ingestion.loaders import json as json_loader
 from app.modules.ingestion.loaders import pdf as pdf_loader
 from app.modules.ingestion.loaders import text as text_loader
+from app.modules.ingestion.loaders import xml as xml_loader
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "multiformat"
 
@@ -32,6 +37,9 @@ def test_registry_maps_expected_suffixes():
         ".jpg": "image",
         ".jpeg": "image",
         ".tiff": "image",
+        ".csv": "csv",
+        ".json": "json",
+        ".xml": "xml",
     }.items():
         assert REGISTRY[suffix][0] == fmt
 
@@ -199,3 +207,65 @@ def test_real_ocr_reads_image_text():
 
     text = ocr_image_bytes((FIXTURES / "sample_image.png").read_bytes()).lower()
     assert "fastapi" in text
+
+
+# --- M5: structured formats (csv/json/xml) + structured chunker ---------------
+
+
+def test_csv_loader_row_blocks_with_header():
+    doc = csv_loader.load(FIXTURES / "sample.csv", "sample.csv")
+    assert doc is not None
+    assert doc.file_type == "csv"
+    assert doc.metadata["row_count"] == 3
+    # 3 data rows, default 20/chunk → one block covering rows 1-3
+    assert len(doc.blocks) == 1
+    block = doc.blocks[0]
+    assert block.content_type == "row"
+    assert block.locator == "rows 1-3"
+    assert "Columns: name, price, in_stock" in block.text  # header prepended
+    assert "name: Widget | price: 9.99" in block.text
+
+
+def test_csv_rows_per_chunk_splits_blocks(monkeypatch):
+    from app.config import get_config
+
+    monkeypatch.setattr(get_config().ingestion.formats.csv, "rows_per_chunk", 2)
+    doc = csv_loader.load(FIXTURES / "sample.csv", "sample.csv")
+    assert doc is not None
+    assert [b.locator for b in doc.blocks] == ["rows 1-2", "rows 3-3"]
+
+
+def test_json_loader_top_level_elements():
+    doc = json_loader.load(FIXTURES / "sample.json", "sample.json")
+    assert doc is not None
+    assert doc.file_type == "json"
+    locators = {b.locator for b in doc.blocks}
+    # top-level object → one block per key
+    assert {"$.service", "$.endpoints", "$.auth"} <= locators
+    assert all(b.content_type == "object" for b in doc.blocks)
+
+
+def test_xml_loader_element_blocks():
+    doc = xml_loader.load(FIXTURES / "sample.xml", "sample.xml")
+    assert doc is not None
+    assert doc.file_type == "xml"
+    assert [b.locator for b in doc.blocks] == ["/catalog/book[1]", "/catalog/book[2]"]
+    assert all(b.content_type == "element" for b in doc.blocks)
+    assert "FastAPI in Action" in doc.blocks[0].text
+    assert "id=b1" in doc.blocks[0].text  # attribute summarized
+
+
+def test_structured_chunker_is_block_passthrough():
+    # Structured formats use the 'structured' chunker regardless of cfg.strategy.
+    doc = xml_loader.load(FIXTURES / "sample.xml", "sample.xml")
+    cfg = ChunkingConfig(strategy="semantic")  # deliberately not 'structured'
+    chunks = chunk_document(doc, cfg)
+    assert len(chunks) == len(doc.blocks)
+    assert all(c.strategy == "structured" for c in chunks)
+    assert [c.locator for c in chunks] == ["/catalog/book[1]", "/catalog/book[2]"]
+
+
+def test_structured_dispatch_and_suffixes():
+    docs = {d.file_type for d in load_documents(FIXTURES, enabled=["csv", "json", "xml"])}
+    assert docs == {"csv", "json", "xml"}
+    assert allowed_suffixes(enabled=["csv", "json", "xml"]) == {".csv", ".json", ".xml"}

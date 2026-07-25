@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog>
+  <book id="b1">
+    <title>FastAPI in Action</title>
+    <topic>Path parameters use type hints</topic>
+  </book>
+  <book id="b2">
+    <title>Async Python</title>
+    <topic>Query parameters follow the URL</topic>
+  </book>
+</catalog>

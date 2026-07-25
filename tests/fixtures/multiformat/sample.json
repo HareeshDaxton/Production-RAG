@@ -1,0 +1,11 @@
+{
+  "service": "fastapi",
+  "endpoints": [
+    {"path": "/items", "method": "GET"},
+    {"path": "/items", "method": "POST"}
+  ],
+  "auth": {
+    "type": "oauth2",
+    "scopes": ["read", "write"]
+  }
+}
