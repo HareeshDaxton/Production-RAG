@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from app.clients.embeddings import get_embedder
 from app.config import get_config
 from app.logging_config import get_logger
-from app.models.schemas import AskResponse, Citation
+from app.models.schemas import AskResponse, Citation, RetrievalFilters
 from app.modules.autoeval.capture import capture as capture_candidate
 from app.modules.cache.service import lookup as cache_lookup
 from app.modules.cache.service import store as cache_store
@@ -20,6 +20,7 @@ from app.modules.generation.generator import generate_answer
 from app.modules.quality.service import QualityReport, assess
 from app.modules.quality.verifier import CitationCheck
 from app.modules.retrieval.dense import RetrievedChunk
+from app.modules.retrieval.filters import Filters
 from app.modules.retrieval.retriever import VALID_MODES, RetrievalResult, retrieve
 
 logger = get_logger(__name__)
@@ -101,9 +102,11 @@ def _idk_response(
     )
 
 
-def _answer(query: str, k: int, mode: str | None) -> AskResponse:
+def _answer(
+    query: str, k: int, mode: str | None, filters: Filters | None = None
+) -> AskResponse:
     """Run the full pipeline (retrieve → generate → verify → gate) for a cache miss."""
-    result = retrieve(query, k, mode)
+    result = retrieve(query, k, mode, filters)
 
     if not result.chunks:
         return _idk_response(query, result)
@@ -134,20 +137,26 @@ def _answer(query: str, k: int, mode: str | None) -> AskResponse:
     )
 
 
-def ask(query: str, top_k: int | None = None, mode: str | None = None) -> AskResponse:
+def ask(
+    query: str,
+    top_k: int | None = None,
+    mode: str | None = None,
+    filters: RetrievalFilters | None = None,
+) -> AskResponse:
     cfg = get_config()
     k = top_k or cfg.retrieval.default_top_k
     resolved_mode = (mode or cfg.retrieval.mode).lower()
     if resolved_mode not in VALID_MODES:
         resolved_mode = "hybrid"
+    fdict = filters.as_dict() if filters else None
 
     # Embed once: used for the cache lookup and (on a miss) reused for storage.
     embedding = get_embedder().embed_query(query)
-    hit = cache_lookup(query, embedding, k, resolved_mode)
+    hit = cache_lookup(query, embedding, k, resolved_mode, fdict)
     if hit.hit and hit.response is not None:
         return hit.response
 
-    response = _answer(query, k, mode)
-    cache_store(query, embedding, k, resolved_mode, response)
+    response = _answer(query, k, mode, fdict)
+    cache_store(query, embedding, k, resolved_mode, response, fdict)
     capture_candidate(query, response)  # flag weak answers for the auto-eval queue (cheap)
     return response
