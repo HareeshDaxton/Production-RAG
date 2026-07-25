@@ -19,17 +19,22 @@ from app.config import get_config
 from app.logging_config import get_logger
 from app.modules.retrieval.confidence import retrieval_confidence
 from app.modules.retrieval.dense import RetrievedChunk, dense_retrieve
+from app.modules.retrieval.filters import Filters
 from app.modules.retrieval.fusion import reciprocal_rank_fusion
 from app.modules.retrieval.sparse import sparse_retrieve
 
 logger = get_logger(__name__)
 
 
-def hybrid_retrieve(query: str, top_k: int) -> tuple[list[RetrievedChunk], float]:
+def hybrid_retrieve(
+    query: str, top_k: int, filters: Filters | None = None
+) -> tuple[list[RetrievedChunk], float]:
     cfg = get_config().retrieval
 
-    dense_hits = dense_retrieve(query, cfg.dense_candidates)
-    sparse_hits = sparse_retrieve(query, cfg.sparse_candidates)
+    # Both retrievers are filtered at source, so the fused pool + rerank only ever
+    # see chunks that match the filters (pool filtered before fusion/rerank).
+    dense_hits = dense_retrieve(query, cfg.dense_candidates, filters)
+    sparse_hits = sparse_retrieve(query, cfg.sparse_candidates, filters)
     if not dense_hits and not sparse_hits:
         return [], 0.0
 

@@ -17,6 +17,7 @@ from app.clients.vectorstore import get_chunks_collection
 from app.config import get_config
 from app.logging_config import get_logger
 from app.modules.retrieval.dense import RetrievedChunk, chunk_from_meta
+from app.modules.retrieval.filters import Filters, metadata_matches
 
 logger = get_logger(__name__)
 
@@ -38,19 +39,26 @@ class BM25Index:
     metadatas: list[dict]
     bm25: object  # rank_bm25.BM25Okapi (picklable)
 
-    def search(self, query: str, top_k: int) -> list[RetrievedChunk]:
+    def search(
+        self, query: str, top_k: int, filters: Filters | None = None
+    ) -> list[RetrievedChunk]:
         if not self.ids:
             return []
         scores = self.bm25.get_scores(_tokenize(query))
         ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
         hits: list[RetrievedChunk] = []
-        for i in ranked[:top_k]:
+        for i in ranked:
             if scores[i] <= 0:  # no term overlap -> not a real match
+                continue
+            # Post-filter by metadata (BM25 has no query engine); take top_k of matches.
+            if not metadata_matches(self.metadatas[i], filters):
                 continue
             hits.append(
                 # raw BM25 score (fusion uses rank, not value)
                 chunk_from_meta(self.ids[i], self.texts[i], self.metadatas[i], float(scores[i]))
             )
+            if len(hits) >= top_k:
+                break
         return hits
 
 
@@ -95,10 +103,12 @@ def get_bm25_index() -> BM25Index | None:
     return _cached
 
 
-def sparse_retrieve(query: str, top_k: int) -> list[RetrievedChunk]:
+def sparse_retrieve(
+    query: str, top_k: int, filters: Filters | None = None
+) -> list[RetrievedChunk]:
     index = get_bm25_index()
     if index is None or index.bm25 is None:
         return []
-    hits = index.search(query, top_k)
+    hits = index.search(query, top_k, filters)
     logger.info("sparse retrieval", extra={"query_len": len(query), "hits": len(hits)})
     return hits

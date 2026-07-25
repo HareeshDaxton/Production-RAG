@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from app.clients.embeddings import get_embedder
 from app.clients.vectorstore import get_chunks_collection
 from app.logging_config import get_logger
+from app.modules.retrieval.filters import Filters, build_where
 
 logger = get_logger(__name__)
 
@@ -42,7 +43,9 @@ def chunk_from_meta(chunk_id: str, text: str, meta: dict | None, score: float) -
     )
 
 
-def dense_retrieve(query: str, top_k: int) -> list[RetrievedChunk]:
+def dense_retrieve(
+    query: str, top_k: int, filters: Filters | None = None
+) -> list[RetrievedChunk]:
     collection = get_chunks_collection()
     if collection.count() == 0:
         return []
@@ -51,6 +54,7 @@ def dense_retrieve(query: str, top_k: int) -> list[RetrievedChunk]:
     res = collection.query(
         query_embeddings=[qvec],
         n_results=min(top_k, collection.count()),
+        where=build_where(filters),  # metadata equality filter (M6); None = no filter
     )
     ids = res["ids"][0]
     docs = res["documents"][0]
