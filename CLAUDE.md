@@ -204,8 +204,27 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
     real-EasyOCR test (`importorskip`). NOTE: fast tests MUST fake OCR — the M3 dispatch/scanned
     tests were updated to patch `ocr.ocr_image_bytes` so the directory sweep over `scanned.pdf`
     never loads the real engine.
-  - **Next: M5** — structured formats (CSV/JSON/XML) + a `structured` block-passthrough chunker
-    (adds no heavy deps; CSV/JSON stdlib, XML via installed `lxml`).
+  - **M5 DONE & validated (ruff clean, 39 fast tests pass — +6 for csv/json/xml).** Structured
+    formats + a `structured` chunker. New `loaders/{csv,json,xml}.py`: **CSV** (stdlib) groups
+    `formats.csv.rows_per_chunk` (20) data rows per Block, prepends the header (`Columns: …`) so each
+    chunk is self-describing, `content_type="row"`, `locator="rows a-b"`; **JSON** (stdlib) → one
+    Block per top-level element (array `$[i]` / object `$.key`; all-scalar object stays whole),
+    `content_type="object"`; **XML** (installed `lxml`) → one Block per direct child of root,
+    `locator="/root/child[i]"` (1-based per tag, attributes summarized), `content_type="element"`.
+    Malformed JSON/XML → skipped with a logged warning (never crashes). **Chunker**: `chunk_document`
+    now dispatches on `doc.file_type` — csv/json/xml use `_chunk_structured` (one record→one chunk,
+    `strategy="structured"`, `split_by_tokens` safety cap for oversized records), **bypassing**
+    recursive/fixed/semantic regardless of `chunking.strategy`. **Prompt**: `_locator` now also
+    renders the structured `locator` (e.g. `From "products.csv" (rows 21-40)`), so structured
+    provenance shows in both the generation context and `Citation` (locator already threaded via M1).
+    Config: `formats.enabled` += `csv,json,xml`; new `CsvFormatConfig.rows_per_chunk`. **No new deps**
+    (stdlib + existing lxml). Fixtures `tests/fixtures/multiformat/sample.{csv,json,xml}`; fast tests
+    in `test_loaders.py` (row/object/element locators, header prepend, rows_per_chunk split,
+    structured passthrough, dispatch). NOTE: for csv/json/xml the `chunking.strategy` setting is
+    intentionally ignored — file_type wins.
+  - **Next: M6** — metadata-filtered retrieval (`AskRequest.filters` on file_type/source → dense
+    `where` + sparse post-filter + hybrid pre-fusion filter; **cache params-hash must include
+    filters**).
 - **ENVIRONMENT NOTE (2026-07-24):** post-reinstall the venv/uv were rebuilt by the user; `uv` lives at
   `C:\Users\hareesh\AppData\Local\Programs\Python\Python312\Scripts\uv.exe` (not on PATH). The earlier
   ChromaDB native-DLL load failure (missing MSVC runtime) is **resolved** — the full fast suite incl.
@@ -283,6 +302,17 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   Docker-Windows (→3.0s); host 6379 taken by another project's redis → mapped redis-stack to **6380**.
   Live: cold 26s → exact HIT 190ms → paraphrase HIT sim=0.936 → post-reingest MISS (invalidation).
   19 tests green (17 fast + 2 slow), lint clean. User commits. Next = Phase 6.
+- 2026-07-25: **Ingestion-v2 M5 COMPLETE.** Structured formats (CSV/JSON/XML) + a `structured`
+  chunker. New `loaders/{csv,json,xml}.py`: CSV groups rows (header prepended, `locator="rows a-b"`,
+  `content_type="row"`); JSON → one block per top-level element (`$[i]`/`$.key`, `content_type=
+  "object"`); XML (lxml) → one block per root child (`/root/child[i]`, `content_type="element"`).
+  Malformed JSON/XML skipped with a warning. `chunker.chunk_document` dispatches on `doc.file_type`:
+  csv/json/xml → new `_chunk_structured` (one record→one chunk, `strategy="structured"`, token-cap
+  safety split), bypassing the text strategies. `prompt._locator` now renders the structured
+  `locator` too (shows in context + citations). Added `CsvFormatConfig` + enabled csv/json/xml in
+  `config.py`/`system.yaml`. No new deps (stdlib + existing lxml). Fixtures `sample.{csv,json,xml}`
+  + tests in `test_loaders.py`. Ruff clean, 39 fast tests green. Next = M6 (metadata-filtered
+  retrieval). User commits.
 - 2026-07-25: **Ingestion-v2 M4 COMPLETE.** OCR for images + scanned PDF pages. **Reverses the
   "No OCR" architecture guardrail** (formally updated above). New `app/modules/ingestion/ocr.py`
   (engine-agnostic `ocr_image_bytes`, lazy `@lru_cache` reader, `easyocr` default | `tesseract`,
