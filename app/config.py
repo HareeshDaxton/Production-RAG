@@ -169,12 +169,19 @@ class OcrConfig(BaseModel):
     dpi: int = 200  # render resolution for scanned PDF pages before OCR
 
 
+class CsvFormatConfig(BaseModel):
+    rows_per_chunk: int = 20  # data rows grouped into one block (header prepended)
+
+
 class FormatsConfig(BaseModel):
     # Formats accepted on ingest/upload. Grows one entry per phase as loaders land
     # (M2: markdown/txt/html; M3: +pdf/docx; M4: +image; M5: +csv/json/xml).
-    enabled: list[str] = ["markdown", "txt", "html", "pdf", "docx", "image"]
+    enabled: list[str] = [
+        "markdown", "txt", "html", "pdf", "docx", "image", "csv", "json", "xml"
+    ]
     pdf: PdfFormatConfig = PdfFormatConfig()
     ocr: OcrConfig = OcrConfig()
+    csv: CsvFormatConfig = CsvFormatConfig()
 
 
 class IngestionConfig(BaseModel):
