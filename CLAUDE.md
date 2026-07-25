@@ -7,8 +7,22 @@
 ## Project
 Portfolio-grade **Production RAG** system fusing BASWE Projects 6 (Hybrid Search) + 7 (Semantic
 Cache) + 13 (Auto-Eval). Answers questions over the **FastAPI** docs + GitHub issues corpus.
-Full 9-phase plan (source of truth): `C:\Users\Hareesh\.claude\plans\hey-now-act-as-deep-creek.md`.
+Full plan (source of truth): `C:\Users\Hareesh\.claude\plans\hey-now-act-as-deep-creek.md`.
 Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
+
+**Canonical phase map (0–9).** The multi-format ingestion work (built after Phase 6, formerly the
+"Ingestion-v2 / M1–M6 track") is now the official **Phase 7**, which renumbers the two remaining
+originals: dashboard → **Phase 8**, service split → **Phase 9**.
+- Phase 0 — Scaffold & foundations — ✅
+- Phase 1 — Thin slice: ingest → ask — ✅
+- Phase 2 — Hybrid retrieval (dense+BM25+RRF+rerank) — ✅
+- Phase 3 — Quality layer (verify + confidence + IDK) — ✅
+- Phase 4 — Evaluation harness (regression gate) — ✅
+- Phase 5 — Semantic cache (Redis) — ✅
+- Phase 6 — Auto-eval loop — ✅
+- Phase 7 — Multi-format ingestion (9 types) + metadata + filtered retrieval — ✅ (was M1–M6)
+- Phase 8 — API polish + Streamlit dashboard — ⏳ deferred
+- Phase 9 — Service split + Postgres/pgvector — ⏳ deferred
 
 ## Environment
 - OS: Windows 11, PowerShell (primary shell). Project root: `e:\Production_RAG`.
@@ -21,9 +35,9 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
 - Secrets: never hardcode API keys — use `.env` (gitignored).
 
 ## Architecture guardrails
-- **Modular monolith now → hard split into services in Phase 8.** Keep module boundaries clean
+- **Modular monolith now → hard split into services in Phase 9.** Keep module boundaries clean
   (`app/{routers,modules,clients,models,utils}`) so the split is mechanical, not a rewrite.
-- **Do not add infra before its phase:** Redis (cache) = Phase 5; Postgres+pgvector = Phase 8.
+- **Do not add infra before its phase:** Redis (cache) = Phase 5; Postgres+pgvector = Phase 9.
   Early datastores are ChromaDB (vectors) + SQLite (metadata/audit/eval) only.
 - **Models:** local embeddings (`bge-base-en-v1.5`, **768-dim** — keep `models.embedding.dimensions`
   in sync with the model) + local cross-encoder rerank +
@@ -141,13 +155,14 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   out-of-corpus query → IDK (conf 0.0006) → captured → drafted `no_answer`/auto_approved → approved to
   candidates.jsonl. Config: `autoeval.{enabled,flag_confidence_threshold,capture_idk,dedup_threshold,
   agreement_threshold,candidates_path}`.
-- **Ingestion-v2 track (multi-format + metadata enrichment + filtered retrieval)** — plan:
-  `C:\Users\hareesh\.claude\plans\ok-now-here-this-peaceful-quail.md`. Six phases (M1–M6) that turn
+- **PHASE 7 — Multi-format ingestion + metadata enrichment + filtered retrieval — ✅ COMPLETE**
+  (was the "Ingestion-v2 / M1–M6 track"; M1–M6 are its internal sub-steps). Plan:
+  `C:\Users\hareesh\.claude\plans\ok-now-here-this-peaceful-quail.md`. Six sub-steps (M1–M6) that turn
   the markdown-only loader into a production ingestion layer: block-based IR, per-chunk metadata
-  enrichment threaded to citations, formats (PDF/DOCX/TXT/MD/HTML/CSV/JSON/XML/**image OCR**), and
+  enrichment threaded to citations, 9 formats (PDF/DOCX/TXT/MD/HTML/CSV/JSON/XML/**image OCR**), and
   retrieval-time metadata filtering. **NOTE: this reverses the old "No OCR" guardrail** — OCR is now
   in-scope for image files + scanned PDF pages only (text PDFs keep native extraction); the guardrail
-  is formally updated in phase M4.
+  is formally updated in sub-step M4.
   - **M1 DONE & validated (committed + pushed; ruff clean, fast tests green).** Block-based IR:
     `loader.Block` + `Document` gains `file_type/blocks/metadata`; markdown loader emits heading-section
     blocks (`split_into_sections` moved loader-side). `Chunk` + all 3 chunkers now attribute every chunk
@@ -242,10 +257,17 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   `C:\Users\hareesh\AppData\Local\Programs\Python\Python312\Scripts\uv.exe` (not on PATH). The earlier
   ChromaDB native-DLL load failure (missing MSVC runtime) is **resolved** — the full fast suite incl.
   `test_ready_endpoint` is green.
-- **Phase 7 (deferred, original plan)** — API surface polish + Streamlit dashboard (query UI,
-  citations, confidence, hybrid-vs-dense toggle, cache panel, eval + review-queue views).
+- **Phase 8 (deferred)** — API surface polish + Streamlit dashboard (query UI, citations, confidence,
+  hybrid-vs-dense toggle, cache panel, eval + review-queue views).
+- **Phase 9 (deferred)** — hard split into services + Postgres/pgvector migration (modular monolith
+  → real services; vectors/metadata move off ChromaDB+SQLite).
 
 ## Update log
+- 2026-07-25: **Phase renumbering → canonical 0–9.** Folded the completed multi-format ingestion work
+  (formerly the unnumbered "Ingestion-v2 / M1–M6 track") in as the official **Phase 7**; renumbered the
+  two remaining originals: dashboard → **Phase 8**, service split + Postgres/pgvector → **Phase 9**.
+  Updated the phase map, architecture guardrails (Phase 8→9 infra refs), and status headers. M1–M6 are
+  retained as Phase 7's internal sub-steps. 8/10 phases done (0–7 ✅); 8–9 deferred. Docs-only change.
 - 2026-07-10: Created. Captured plan pointer, environment, architecture guardrails, conventions, status.
 - 2026-07-11: Phase 0 started. Env facts locked: venv is uv-managed Python 3.13.12 (no pip); use `uv`
   for deps; generation provider = OpenAI. Next concrete step: create `pyproject.toml` + `app/` package
@@ -323,10 +345,10 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   **Cache fix**: `params_hash` + `lookup`/`store` now include a canonical filters key so filtered
   queries never hit unfiltered cached answers. Equality-only by design (Chroma has no metadata
   substring op → section-substring deferred). No new deps. Tests `tests/test_retrieval_filters.py`
-  (9 fast). Ruff clean, 48 fast tests green. **Ingestion-v2 (M1–M6) is now 100% complete**: block IR
+  (9 fast). Ruff clean, 48 fast tests green. **Phase 7 (M1–M6) is now 100% complete**: block IR
   → 9 formats (md/txt/html/pdf/docx/image-OCR/csv/json/xml) → per-chunk metadata → citations →
-  filtered retrieval. Remaining project work = deferred original Phase 7 (Streamlit dashboard/API
-  polish) + Phase 8 (service split + Postgres/pgvector). User commits.
+  filtered retrieval. **Renumbered:** the multi-format track is the official Phase 7; remaining work =
+  Phase 8 (Streamlit dashboard/API polish) + Phase 9 (service split + Postgres/pgvector). User commits.
 - 2026-07-25: **Ingestion-v2 M5 COMPLETE.** Structured formats (CSV/JSON/XML) + a `structured`
   chunker. New `loaders/{csv,json,xml}.py`: CSV groups rows (header prepended, `locator="rows a-b"`,
   `content_type="row"`); JSON → one block per top-level element (`$[i]`/`$.key`, `content_type=
