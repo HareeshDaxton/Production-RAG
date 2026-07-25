@@ -20,12 +20,14 @@ Rules:
 
 
 def _locator(c: RetrievedChunk) -> str:
-    """Human-readable provenance suffix: page and/or section, when known."""
+    """Human-readable provenance suffix: page, section, and/or structured locator."""
     parts: list[str] = []
     if c.page_number is not None:
         parts.append(f"p.{c.page_number}")
     if c.section_path:
         parts.append(f"Section: {c.section_path}")
+    if c.locator:  # structured formats: "rows 21-40" / "$.items[3]" / "/catalog/book[2]"
+        parts.append(c.locator)
     return f" ({', '.join(parts)})" if parts else ""
 
 
