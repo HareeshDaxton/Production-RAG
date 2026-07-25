@@ -46,7 +46,14 @@ class Chunk:
     created_at: str
 
 
+# Structured formats are records, not prose — chunked by block (one record per
+# chunk), bypassing the text strategies regardless of cfg.strategy.
+STRUCTURED_FORMATS = {"csv", "json", "xml"}
+
+
 def chunk_document(doc: Document, cfg: ChunkingConfig) -> list[Chunk]:
+    if doc.file_type in STRUCTURED_FORMATS:
+        return _chunk_structured(doc, cfg)
     if cfg.strategy == "recursive":
         return _chunk_recursive(doc, cfg)
     if cfg.strategy == "fixed":
@@ -84,6 +91,32 @@ def _make_chunk(doc: Document, block: Block, idx: int, text: str, strategy: str)
         char_count=len(text),
         created_at=str(doc.metadata.get("created_at", "")),
     )
+
+
+# --- structured: one record (block) per chunk, bypassing text strategies -----
+
+
+def _chunk_structured(doc: Document, cfg: ChunkingConfig) -> list[Chunk]:
+    """Block-passthrough for csv/json/xml: each block is a record and becomes one
+    chunk, inheriting its locator/content_type. An oversized block (e.g. one giant
+    JSON object) is split by tokens as a safety cap; the pieces share the locator."""
+    chunks: list[Chunk] = []
+    idx = 0
+    for block in _blocks_for(doc):
+        text = block.text.strip()
+        if not text:
+            continue
+        if count_tokens(text) <= cfg.max_chunk_tokens:
+            pieces = [text]
+        else:
+            pieces = split_by_tokens(text, cfg.max_chunk_tokens, cfg.overlap_tokens)
+        for piece in pieces:
+            piece = piece.strip()
+            if len(piece) < cfg.min_chunk_chars:
+                continue
+            chunks.append(_make_chunk(doc, block, idx, piece, "structured"))
+            idx += 1
+    return chunks
 
 
 # --- recursive: token-cap each structural block ------------------------------
