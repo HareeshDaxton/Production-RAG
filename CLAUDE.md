@@ -28,7 +28,10 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
 - **Models:** local embeddings (`bge-base-en-v1.5`, **768-dim** — keep `models.embedding.dimensions`
   in sync with the model) + local cross-encoder rerank +
   configurable judge (Ollama or cheap API). API used only for final grounded generation.
-- **No OCR** — corpus is text-first (markdown/HTML/issues JSON).
+- **OCR is in-scope (Ingestion-v2 M4)** — reverses the original "No OCR" guardrail. OCR runs
+  **only** for image files + *scanned* PDF pages (text PDFs/DOCX/HTML keep native extraction).
+  Engine is config-selectable (`easyocr` default | `tesseract`); disabled/unavailable → scanned
+  content is skipped gracefully, ingest never crashes.
 
 ## Conventions
 - **Config-driven:** thresholds, model names, chunking strategies live in `config/system.yaml` —
@@ -183,8 +186,26 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
     dispatcher change (block IR from M1 already threads page/section → citations). Binary fixtures
     (`sample.pdf`, `scanned.pdf`, `sample.docx`) generated with the libs, committed under
     `tests/fixtures/multiformat/`; fast tests in `tests/test_loaders.py`.
-  - **Next: M4** — OCR for images + scanned PDF pages (`pillow` + `easyocr`, config-selectable
-    engine); fills the `scanned`-flagged blocks + adds `loaders/image.py`.
+  - **M4 DONE & validated (ruff clean, 33 fast tests pass — +5 for OCR; real-OCR slow test green).**
+    OCR for images + scanned PDF pages. New `app/modules/ingestion/ocr.py` — engine-agnostic choke
+    point (`ocr_image_bytes(bytes) -> str`; `@lru_cache` reader, lazy heavy import): engine
+    config-selectable (`easyocr` default, reuses installed torch, no system binary | `tesseract`,
+    needs system Tesseract.exe + optional `pytesseract`). **Graceful degrade**: OCR disabled /
+    engine missing / model-download fail / unreadable image → logged warning + `""`, ingest never
+    crashes. New `loaders/image.py` (`@register "image"`, suffixes `.png/.jpg/.jpeg/.tiff/.tif/.bmp/
+    .webp/.gif`) → OCR → one `content_type="ocr"` Block, `metadata.ocr_used=True`; empty OCR → skip.
+    `loaders/pdf.py` scanned branch now renders the page to PNG (`page.get_pixmap(dpi=ocr.dpi)`) →
+    OCR → `content_type="ocr"` Block + `metadata.ocr_used=True`; OCR off/empty → unchanged M3
+    behavior (empty `scanned` block, dropped by chunker). Config: `formats.enabled` += `image`; new
+    `OcrConfig{enabled,engine,languages,dpi}`. Deps: `pillow 12.3.0` + `easyocr 1.7.2` (pulls
+    opencv-headless/scikit-image/torchvision; ~90MB EasyOCR models download on first real OCR).
+    Fixture `sample_image.png` (Pillow-rendered text). **Tests**: fast wiring via monkeypatched OCR
+    (image block, empty-skip, scanned fill-in, degrade-to-M3, disabled short-circuit) + a `slow`
+    real-EasyOCR test (`importorskip`). NOTE: fast tests MUST fake OCR — the M3 dispatch/scanned
+    tests were updated to patch `ocr.ocr_image_bytes` so the directory sweep over `scanned.pdf`
+    never loads the real engine.
+  - **Next: M5** — structured formats (CSV/JSON/XML) + a `structured` block-passthrough chunker
+    (adds no heavy deps; CSV/JSON stdlib, XML via installed `lxml`).
 - **ENVIRONMENT NOTE (2026-07-24):** post-reinstall the venv/uv were rebuilt by the user; `uv` lives at
   `C:\Users\hareesh\AppData\Local\Programs\Python\Python312\Scripts\uv.exe` (not on PATH). The earlier
   ChromaDB native-DLL load failure (missing MSVC runtime) is **resolved** — the full fast suite incl.
@@ -262,6 +283,17 @@ Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
   Docker-Windows (→3.0s); host 6379 taken by another project's redis → mapped redis-stack to **6380**.
   Live: cold 26s → exact HIT 190ms → paraphrase HIT sim=0.936 → post-reingest MISS (invalidation).
   19 tests green (17 fast + 2 slow), lint clean. User commits. Next = Phase 6.
+- 2026-07-25: **Ingestion-v2 M4 COMPLETE.** OCR for images + scanned PDF pages. **Reverses the
+  "No OCR" architecture guardrail** (formally updated above). New `app/modules/ingestion/ocr.py`
+  (engine-agnostic `ocr_image_bytes`, lazy `@lru_cache` reader, `easyocr` default | `tesseract`,
+  graceful degrade → `""` on any failure). New `loaders/image.py` (OCR image files →
+  `content_type="ocr"` block). `loaders/pdf.py` scanned pages now rendered → OCR'd (`ocr_used`
+  metadata); OCR off/empty falls back to M3 behavior. Added `OcrConfig` + `image` to
+  `config.py`/`system.yaml`. Deps: `pillow 12.3.0`, `easyocr 1.7.2` (+opencv-headless/scikit-image/
+  torchvision; ~90MB models on first run) via `uv add`. Fixture `sample_image.png`; tests in
+  `test_loaders.py` (fast monkeypatched wiring + `slow` real-OCR). Updated M3 pdf tests to fake OCR
+  so the fast suite never loads the engine. Ruff clean, 33 fast tests green + slow real-OCR passed.
+  Next = M5 (CSV/JSON/XML). User commits.
 - 2026-07-24: **Ingestion-v2 M3 COMPLETE.** PDF + DOCX loaders. New `app/modules/ingestion/loaders/
   {pdf,docx}.py`: PDF (PyMuPDF) emits one Block per page (1-based `page`, native text extraction,
   doc metadata `page_count`/`has_scanned_pages`) with scanned-page detection (text density <
