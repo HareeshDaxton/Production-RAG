@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -55,11 +55,37 @@ class Citation(BaseModel):
     verdict_reason: str | None = None
 
 
+class RetrievalFilters(BaseModel):
+    """Equality filters applied to chunk metadata before ranking (M6).
+
+    Unknown keys are rejected so a typo fails loudly instead of silently matching
+    nothing. Substring/section filtering is intentionally out of scope — Chroma's
+    metadata `where` supports equality, not substring, on metadata fields.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_type: str | None = Field(
+        default=None, description="pdf|docx|csv|json|xml|html|txt|markdown|image"
+    )
+    source: str | None = Field(default=None, description="Exact source path/filename.")
+    content_type: str | None = Field(
+        default=None, description="text|table|row|object|element|ocr|code"
+    )
+
+    def as_dict(self) -> dict[str, str]:
+        """Active (non-None) filters as a flat equality dict."""
+        return {k: v for k, v in self.model_dump().items() if v is not None}
+
+
 class AskRequest(BaseModel):
     query: str = Field(..., min_length=3, max_length=2000)
     top_k: int | None = Field(default=None, ge=1, le=20)
     mode: Literal["hybrid", "dense"] | None = Field(
         default=None, description="Override retrieval mode; defaults to config (hybrid)."
+    )
+    filters: RetrievalFilters | None = Field(
+        default=None, description="Restrict retrieval to chunks matching these metadata equalities."
     )
 
 
