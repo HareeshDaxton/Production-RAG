@@ -6,14 +6,20 @@
 # these as direct deps in pyproject and updates the lock. This file just lets you
 # install in one shot instead of one-by-one.
 #
-# Covers the RAG core through Phase 6. Frontend (Streamlit) and Phase-8 infra are
-# listed COMMENTED at the bottom on purpose — we install those when we reach them,
-# so we don't bloat the env with unused heavy packages now.
+# Covers Phases 0-8 (the full backend + the API the Next.js UI talks to).
+# Phase 9 infra (service split + Postgres/pgvector) is listed COMMENTED at the
+# bottom on purpose — installed when we reach it, not before.
+#
+# NOT installed by this file:
+#   - Node packages for the UI    -> cd frontend && npm install
+#   - Redis server                -> docker compose up -d redis
+#   - Model weights (bge / cross-encoder / EasyOCR) -> downloaded on first use
 # =============================================================================
 
 # --- Web API / serving -------------------------------------------------------
 fastapi
 uvicorn[standard]
+python-multipart       # multipart parsing for POST /v1/ingest/upload
 
 # --- Config, models, logging -------------------------------------------------
 pydantic
@@ -23,48 +29,51 @@ python-json-logger
 
 # --- LLM / embeddings / structured output ------------------------------------
 openai                 # final grounded generation (API)
-instructor             # Pydantic-typed LLM outputs
+instructor             # Pydantic-typed LLM output + partial streaming
 tiktoken               # token counting / context budgeting
 httpx                  # async HTTP (LLM + GitHub API)
 
-# --- Retrieval: dense + sparse + rerank --------------------------------------
+# --- Retrieval: dense + sparse + rerank (Phase 2) ----------------------------
 chromadb               # dense vector store
 sentence-transformers  # local embeddings + cross-encoder reranker (pulls torch)
-rank-bm25              # sparse keyword index (Phase 2)
+rank-bm25              # sparse keyword index
 
-# --- Corpus ingestion (FastAPI docs + GitHub issues) -------------------------
-beautifulsoup4         # HTML doc parsing
-lxml                   # fast HTML/XML parser backend
-markdown-it-py         # markdown parsing (headings / structure)
-python-frontmatter     # YAML front-matter in docs .md files
-PyGithub               # GitHub issues fetching
+# --- Multi-format ingestion, 9 types (Phase 7) -------------------------------
+python-frontmatter     # YAML front-matter in markdown
+beautifulsoup4         # HTML parsing
+lxml                   # fast HTML/XML backend; also backs the XML loader
+markdown-it-py         # markdown structure / headings
+pymupdf                # PDF text extraction + page rasterisation for OCR
+python-docx            # DOCX paragraphs, heading styles, tables
+pillow                 # image decoding for the OCR path
+easyocr                # OCR for images + scanned PDF pages; reuses torch
+# NOTE: csv / json loaders use the stdlib — no package required.
 
-# --- Evaluation & analysis (Phase 4 / 6) -------------------------------------
+# --- Corpus fetching ---------------------------------------------------------
+PyGithub               # GitHub issues fetching (scripts/fetch_corpus.py)
+
+# --- Evaluation & auto-eval (Phases 4 & 6) -----------------------------------
 numpy
 pandas                 # eval tables / reports
-scikit-learn           # metrics, similarity, clustering helpers
+scikit-learn           # metrics, similarity helpers
 
 # --- Semantic cache (Phase 5) ------------------------------------------------
-redis                  # cache client (talks to a Redis server run via Docker)
+redis                  # client only; the server runs via docker compose
 
 # --- Local judge (optional, Phase 3) -----------------------------------------
-ollama                 # local judge client (only if you run Ollama)
+ollama                 # only needed if models.judge points at a local Ollama
+
+# --- Dev tooling -------------------------------------------------------------
+# Installed as a dev group, not with the line above:
+#   uv add --dev pytest pytest-asyncio ruff
 
 # =============================================================================
-# DEFERRED — uncomment when we reach the phase (kept off now to avoid bloat):
+# DEFERRED — Phase 9 (service split + Postgres/pgvector). Uncomment when started:
 #
-# Phase 6 clustering / cache helpers (optional, may need build tools on Windows):
-#   hdbscan
-#   redisvl                    # Redis vector-search helper (needs Redis Stack)
-#
-# Phase 7 frontend (you asked to defer this):
-#   streamlit
-#
-# Phase 8 infra / observability (Python clients; the servers come via Docker):
+#   psycopg[binary]            # Postgres driver
+#   pgvector                   # pgvector integration
 #   celery                     # background workers
 #   prometheus-client          # metrics
 #   opentelemetry-sdk
 #   opentelemetry-exporter-otlp
-#   psycopg[binary]            # Postgres driver
-#   pgvector                   # pgvector integration
 # =============================================================================
