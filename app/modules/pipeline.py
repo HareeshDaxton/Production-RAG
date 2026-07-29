@@ -7,7 +7,7 @@ combined, and answers below `quality.idk_threshold` are replaced with an honest
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 from app.clients.embeddings import get_embedder
 from app.config import get_config
@@ -16,7 +16,8 @@ from app.models.schemas import AskResponse, Citation, RetrievalFilters
 from app.modules.autoeval.capture import capture as capture_candidate
 from app.modules.cache.service import lookup as cache_lookup
 from app.modules.cache.service import store as cache_store
-from app.modules.generation.generator import generate_answer
+from app.modules.generation.generator import generate_answer, stream_answer
+from app.modules.generation.schemas import GeneratedAnswer
 from app.modules.quality.service import QualityReport, assess
 from app.modules.quality.verifier import CitationCheck
 from app.modules.retrieval.dense import RetrievedChunk
@@ -102,16 +103,8 @@ def _idk_response(
     )
 
 
-def _answer(
-    query: str, k: int, mode: str | None, filters: Filters | None = None
-) -> AskResponse:
-    """Run the full pipeline (retrieve → generate → verify → gate) for a cache miss."""
-    result = retrieve(query, k, mode, filters)
-
-    if not result.chunks:
-        return _idk_response(query, result)
-
-    gen = generate_answer(query, result.chunks)
+def _final_response(query: str, result: RetrievalResult, gen: GeneratedAnswer) -> AskResponse:
+    """Verify + score a generated answer, applying the IDK gate. Shared by both paths."""
     report = assess(
         query,
         gen.answer,
@@ -119,11 +112,9 @@ def _answer(
         self_confidence=gen.self_confidence,
         retrieval_confidence=result.confidence,
     )
-
     # Below the threshold → refuse to guess; return an honest IDK with what was found.
     if not report.answerable:
         return _idk_response(query, result, report)
-
     return AskResponse(
         query=query,
         answer=gen.answer,
@@ -135,6 +126,19 @@ def _answer(
         confidence=report.confidence,
         confidence_breakdown=report.breakdown,
     )
+
+
+def _answer(
+    query: str, k: int, mode: str | None, filters: Filters | None = None
+) -> AskResponse:
+    """Run the full pipeline (retrieve → generate → verify → gate) for a cache miss."""
+    result = retrieve(query, k, mode, filters)
+
+    if not result.chunks:
+        return _idk_response(query, result)
+
+    # Verify + score + apply the IDK gate (shared with the streaming path).
+    return _final_response(query, result, generate_answer(query, result.chunks))
 
 
 def ask(
@@ -160,3 +164,79 @@ def ask(
     cache_store(query, embedding, k, resolved_mode, response, fdict)
     capture_candidate(query, response)  # flag weak answers for the auto-eval queue (cheap)
     return response
+
+
+def ask_stream(
+    query: str,
+    top_k: int | None = None,
+    mode: str | None = None,
+    filters: RetrievalFilters | None = None,
+) -> Iterator[dict]:
+    """Event stream for `/v1/ask/stream`.
+
+    Emits `meta` -> many `delta` -> one terminal `final`. The answer is streamed as the
+    model produces it, but citations, confidence and the IDK gate can only be computed
+    once generation finishes — so `final` carries the authoritative response and the
+    client must render it in place of the streamed text. When the quality gate replaces
+    the answer with a refusal, `final.replaced` is true so the UI can say so rather than
+    silently swapping the text out.
+    """
+    cfg = get_config()
+    k = top_k or cfg.retrieval.default_top_k
+    resolved_mode = (mode or cfg.retrieval.mode).lower()
+    if resolved_mode not in VALID_MODES:
+        resolved_mode = "hybrid"
+    fdict = filters.as_dict() if filters else None
+
+    embedding = get_embedder().embed_query(query)
+    hit = cache_lookup(query, embedding, k, resolved_mode, fdict)
+    if hit.hit and hit.response is not None:
+        # Nothing to stream — a cache hit is already a complete, verified answer.
+        yield {"type": "final", "streamed": False, "replaced": False,
+               "response": hit.response.model_dump()}
+        return
+
+    result = retrieve(query, k, mode, fdict)
+    yield {
+        "type": "meta",
+        "retrieval_mode": result.mode,
+        "chunks_retrieved": len(result.chunks),
+    }
+
+    if not result.chunks:
+        response = _idk_response(query, result)
+        yield {"type": "final", "streamed": False, "replaced": False,
+               "response": response.model_dump()}
+        cache_store(query, embedding, k, resolved_mode, response, fdict)
+        capture_candidate(query, response)
+        return
+
+    sent = ""
+    latest = None
+    for partial in stream_answer(query, result.chunks):
+        latest = partial
+        text = partial.answer or ""
+        # Partials are cumulative; forward only what the client has not seen.
+        if len(text) > len(sent):
+            yield {"type": "delta", "text": text[len(sent) :]}
+            sent = text
+
+    if latest is None:
+        raise RuntimeError("generation stream produced no output")
+
+    gen = GeneratedAnswer(
+        answer=latest.answer or "",
+        citations_used=list(latest.citations_used or []),
+        has_sufficient_context=bool(latest.has_sufficient_context),
+        self_confidence=float(latest.self_confidence or 0.0),
+    )
+    response = _final_response(query, result, gen)
+    yield {
+        "type": "final",
+        "streamed": True,
+        "replaced": response.answer != gen.answer,
+        "response": response.model_dump(),
+    }
+
+    cache_store(query, embedding, k, resolved_mode, response, fdict)
+    capture_candidate(query, response)
