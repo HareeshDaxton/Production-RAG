@@ -5,9 +5,20 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from app.models.schemas import IngestRequest, IngestResponse
+from app.config import get_config
+from app.models.schemas import (
+    DocumentsResponse,
+    IndexedDocumentOut,
+    IngestRequest,
+    IngestResponse,
+    SystemResponse,
+)
 from app.modules.ingestion.loader import allowed_suffixes
-from app.modules.ingestion.service import ingest_directory, ingest_files
+from app.modules.ingestion.service import (
+    ingest_directory,
+    ingest_files,
+    list_indexed_documents,
+)
 
 router = APIRouter(prefix="/v1", tags=["ingest"])
 
@@ -46,4 +57,28 @@ async def ingest_upload(
         documents_ingested=result.documents,
         chunks_created=result.chunks,
         source_dir=result.source_dir,
+    )
+
+
+@router.get("/documents", response_model=DocumentsResponse)
+def documents() -> DocumentsResponse:
+    """Documents currently searchable — powers the UI's document filter."""
+    docs = list_indexed_documents()
+    return DocumentsResponse(
+        documents=[IndexedDocumentOut(**vars(d)) for d in docs],
+        total_chunks=sum(d.chunks for d in docs),
+    )
+
+
+@router.get("/system", response_model=SystemResponse)
+def system() -> SystemResponse:
+    """Model wiring + corpus size for the UI's system panel."""
+    cfg = get_config()
+    docs = list_indexed_documents()
+    return SystemResponse(
+        generation_model=cfg.models.generation.name,
+        embedding_model=cfg.models.embedding.name.split("/")[-1],
+        retrieval_mode=cfg.retrieval.mode,
+        documents=len(docs),
+        chunks=sum(d.chunks for d in docs),
     )

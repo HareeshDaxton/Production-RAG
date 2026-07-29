@@ -35,6 +35,31 @@ class IngestResponse(BaseModel):
     source_dir: str
 
 
+class IndexedDocumentOut(BaseModel):
+    """One distinct document currently searchable in the chunk collection."""
+
+    source: str
+    title: str
+    file_type: str
+    chunks: int
+    pages: int | None = None
+
+
+class DocumentsResponse(BaseModel):
+    documents: list[IndexedDocumentOut]
+    total_chunks: int
+
+
+class SystemResponse(BaseModel):
+    """Model wiring surfaced to the UI's system panel."""
+
+    generation_model: str
+    embedding_model: str
+    retrieval_mode: str
+    documents: int
+    chunks: int
+
+
 # --- Ask ---------------------------------------------------------------------
 
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.clients.db import record_ingestion
-from app.clients.vectorstore import reset_chunks_collection
+from app.clients.vectorstore import get_chunks_collection, reset_chunks_collection
 from app.config import get_config
 from app.logging_config import get_logger
 from app.modules.ingestion.chunker import chunk_document
@@ -22,6 +22,49 @@ class IngestResult:
     documents: int
     chunks: int
     source_dir: str
+
+
+@dataclass
+class IndexedDocument:
+    source: str
+    title: str
+    file_type: str
+    chunks: int
+    pages: int | None  # highest page seen (paginated sources only)
+
+
+def list_indexed_documents() -> list[IndexedDocument]:
+    """Distinct documents currently in the chunk collection.
+
+    The collection is the source of truth for what is searchable — `ingestion_audit`
+    only records the directory an ingest ran against, not individual files.
+    """
+    collection = get_chunks_collection()
+    if collection.count() == 0:
+        return []
+
+    data = collection.get(include=["metadatas"])
+    grouped: dict[str, IndexedDocument] = {}
+    for meta in data.get("metadatas") or []:
+        meta = meta or {}
+        source = str(meta.get("source") or "")
+        if not source:
+            continue
+        page = meta.get("page_number")
+        existing = grouped.get(source)
+        if existing is None:
+            grouped[source] = IndexedDocument(
+                source=source,
+                title=str(meta.get("title") or source),
+                file_type=str(meta.get("file_type") or ""),
+                chunks=1,
+                pages=int(page) if isinstance(page, int) else None,
+            )
+        else:
+            existing.chunks += 1
+            if isinstance(page, int):
+                existing.pages = max(existing.pages or 0, page)
+    return sorted(grouped.values(), key=lambda d: d.source)
 
 
 def ingest_directory(source_dir: str | Path | None = None, reset: bool = False) -> IngestResult:
