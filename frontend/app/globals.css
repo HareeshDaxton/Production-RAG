@@ -1,0 +1,214 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Tokens are declared as plain CSS variables per theme, and @theme points at
+   them — so `bg-surface`, `text-muted-foreground` etc. resolve correctly in both
+   light and dark without duplicating a single utility class.
+--------------------------------------------------------------------------- */
+/* Strictly monochrome: black, white and greys only — no hue anywhere, including
+   borders and focus rings. Status therefore cannot be carried by colour, so
+   verdicts/errors are distinguished by icon, label and contrast level instead
+   (which is the accessible pattern regardless). */
+:root {
+  --bg: #000000;
+  --sidebar: #000000;
+  --surface: #0d0d0d;
+  --surface-hover: #1a1a1a;
+  --fg: #ffffff;
+  --muted: #121212;
+  --muted-fg: #9a9a9a;
+  --border: #292929;
+  --accent: #ffffff;
+  --accent-fg: #000000;
+  /* Semantic tokens collapse onto the greyscale ramp: strong = foreground,
+     secondary = muted. Meaning comes from the icon + label, not the hue. */
+  --success: #ffffff;
+  --warning: #9a9a9a;
+  --danger: #ffffff;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --sidebar: #fafafa;
+  --surface: #ffffff;
+  --surface-hover: #f2f2f2;
+  --fg: #000000;
+  --muted: #f5f5f5;
+  --muted-fg: #5f5f5f;
+  --border: #dcdcdc;
+  --accent: #000000;
+  --accent-fg: #ffffff;
+  --success: #000000;
+  --warning: #5f5f5f;
+  --danger: #000000;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-foreground: var(--fg);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-fg);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-fg);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-destructive: var(--danger);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono-stack);
+}
+
+:root {
+  --font-mono-stack: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  /* Inverted rather than tinted: a translucent white wash on a white glyph would
+     be unreadable now that the accent is pure white. */
+  ::selection {
+    background-color: var(--fg);
+    color: var(--bg);
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+  }
+
+  /* Caret shown at the end of streaming text. */
+  .caret > *:last-child::after {
+    content: "";
+    display: inline-block;
+    width: 0.45em;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    background-color: var(--fg);
+    animation: caret-blink 1s steps(2, start) infinite;
+  }
+  @keyframes caret-blink {
+    to {
+      visibility: hidden;
+    }
+  }
+}
+
+/* --- Answer prose ---------------------------------------------------------- */
+.prose-answer {
+  line-height: 1.75;
+  font-size: 0.9375rem;
+}
+.prose-answer > * + * {
+  margin-top: 1em;
+}
+.prose-answer h1,
+.prose-answer h2,
+.prose-answer h3 {
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 1.5em;
+}
+.prose-answer h1 { font-size: 1.2rem; }
+.prose-answer h2 { font-size: 1.08rem; }
+.prose-answer h3 { font-size: 1rem; }
+.prose-answer ul,
+.prose-answer ol { padding-left: 1.4em; }
+.prose-answer ul { list-style: disc; }
+.prose-answer ol { list-style: decimal; }
+.prose-answer li + li { margin-top: 0.35em; }
+.prose-answer a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.prose-answer strong { font-weight: 600; }
+.prose-answer code {
+  font-family: var(--font-mono-stack);
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background-color: var(--muted);
+  border: 1px solid var(--border);
+}
+.prose-answer pre {
+  overflow-x: auto;
+  padding: 0.95rem 1.05rem;
+  border-radius: 10px;
+  background-color: var(--muted);
+  border: 1px solid var(--border);
+}
+.prose-answer pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+.prose-answer blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 1rem;
+  color: var(--muted-fg);
+}
+.prose-answer table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  display: block;
+  overflow-x: auto;
+}
+.prose-answer th,
+.prose-answer td {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+}
+.prose-answer th {
+  background-color: var(--muted);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
