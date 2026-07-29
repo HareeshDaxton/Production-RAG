@@ -7,6 +7,13 @@ app:
   environment: development        # development | staging | production
   log_level: INFO                 # DEBUG | INFO | WARNING | ERROR
 
+cors:                             # Phase 8: browser access for the Next.js frontend
+  enabled: true
+  allow_origins: ["http://localhost:3000", "http://127.0.0.1:3000"]
+  allow_credentials: true
+  allow_methods: ["*"]
+  allow_headers: ["*"]
+
 paths:
   data_dir: data
   chroma_dir: data/chroma

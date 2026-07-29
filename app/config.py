@@ -151,6 +151,16 @@ class CacheConfig(BaseModel):
     cost_per_answer_usd: float = 0.002  # estimate used for the cost-saved stat
 
 
+class CorsConfig(BaseModel):
+    """Browser access for the Phase 8 frontend (dev server on :3000)."""
+
+    enabled: bool = True
+    allow_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    allow_credentials: bool = True
+    allow_methods: list[str] = ["*"]
+    allow_headers: list[str] = ["*"]
+
+
 class CorpusConfig(BaseModel):
     dir: Path = Path("data/corpus")  # default ingest source (populated by fetch script)
 
@@ -192,6 +202,7 @@ class IngestionConfig(BaseModel):
 
 class AppConfig(BaseModel):
     app: AppMeta = AppMeta()
+    cors: CorsConfig = CorsConfig()
     paths: Paths = Paths()
     models: ModelsConfig = ModelsConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
