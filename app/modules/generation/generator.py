@@ -1,7 +1,7 @@
 """Call the LLM to produce a grounded, cited answer as structured output."""
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 from app.clients.llm import get_instructor_client
 from app.config import get_config
@@ -34,3 +34,25 @@ def generate_answer(query: str, chunks: Sequence[RetrievedChunk]) -> GeneratedAn
         },
     )
     return result
+
+
+def stream_answer(query: str, chunks: Sequence[RetrievedChunk]) -> Iterator[GeneratedAnswer]:
+    """Yield progressively-filled `GeneratedAnswer` objects as the model streams.
+
+    `create_partial` emits the same structured contract as `generate_answer`, one
+    partial at a time, so the caller can forward `answer` deltas to the client while
+    still ending up with citations/self_confidence for the quality layer. Fields are
+    None until the model reaches them — callers must treat every field as optional.
+    """
+    cfg = get_config().models.generation
+    client = get_instructor_client()
+    return client.chat.completions.create_partial(
+        model=cfg.name,
+        response_model=GeneratedAnswer,
+        temperature=cfg.temperature,
+        max_tokens=cfg.max_tokens,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": build_user_prompt(query, chunks)},
+        ],
+    )
