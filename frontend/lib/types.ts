@@ -15,10 +15,18 @@ export interface Citation {
   verdict_reason: string | null;
 }
 
+/** Mirrors `RetrievalFilters` — `source` takes one filename or several (matches any). */
+export interface RetrievalFilters {
+  file_type?: string;
+  source?: string | string[];
+  content_type?: string;
+}
+
 export interface AskRequest {
   query: string;
   top_k?: number;
   mode?: RetrievalMode;
+  filters?: RetrievalFilters;
 }
 
 export interface AskResponse {
@@ -55,6 +63,13 @@ export interface DocumentsResponse {
   total_chunks: number;
 }
 
+/** POST /v1/title — ChatGPT-style conversation naming. */
+export interface TitleResponse {
+  title: string;
+  /** False when the backend fell back to a trim of the question. */
+  generated: boolean;
+}
+
 /** GET /v1/system — model wiring for the sidebar panel. */
 export interface SystemInfo {
   generation_model: string;
@@ -88,6 +103,8 @@ export interface ChatMessage {
   /** The question that produced this answer, so Regenerate can replay it. */
   prompt?: string;
   feedback?: "up" | "down";
+  /** Files attached to this question — rendered above the bubble, like ChatGPT. */
+  attachments?: string[];
 }
 
 export interface Conversation {
@@ -96,4 +113,10 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  /**
+   * Sources (`IndexedDocument.source`) attached in this chat. The index is shared,
+   * but a chat that has attachments answers **from those files only** (sent as
+   * `filters.source`), so a new chat starts clean instead of inheriting the last upload.
+   */
+  attachments: string[];
 }

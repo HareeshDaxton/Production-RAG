@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, askStream } from "@/lib/api";
+import { ApiError, askStream, generateTitle } from "@/lib/api";
 import { createConversation, loadConversations, saveConversations } from "@/lib/storage";
 import type { ChatMessage, Conversation, RetrievalMode } from "@/lib/types";
 import { createId, deriveTitle } from "@/lib/utils";
@@ -12,6 +12,9 @@ export function useChat() {
   const [hydrated, setHydrated] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mode] = useState<RetrievalMode>("hybrid");
+  // Uploaded files waiting to be sent — they ride along with the next message,
+  // the way an attachment does in ChatGPT, rather than hanging over the composer.
+  const [staged, setStaged] = useState<string[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const skipFirstSave = useRef(true);
@@ -37,6 +40,9 @@ export function useChat() {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const active = conversations.find((c) => c.id === activeId) ?? null;
+
+  /** Everything this chat answers from: already attached + about to be sent. */
+  const scope = [...new Set([...(active?.attachments ?? []), ...staged])];
 
   const patchMessage = useCallback(
     (conversationId: string, messageId: string, patch: Partial<ChatMessage>) => {
@@ -77,13 +83,20 @@ export function useChat() {
   );
 
   const runStream = useCallback(
-    async (conversationId: string, prompt: string, assistantId: string) => {
+    async (
+      conversationId: string,
+      prompt: string,
+      assistantId: string,
+      sources: string[] = [],
+    ) => {
       const controller = new AbortController();
       abortRef.current = controller;
       setBusy(true);
       try {
         await askStream(
-          { query: prompt, mode },
+          // Attached files scope the search: without this a question about an
+          // uploaded CSV loses to whatever prose is already in the corpus.
+          { query: prompt, mode, ...(sources.length ? { filters: { source: sources } } : {}) },
           (event) => {
             switch (event.type) {
               case "delta":
@@ -126,13 +139,42 @@ export function useChat() {
     [mode, appendDelta, patchMessage],
   );
 
+  /**
+   * Replace the placeholder title with a summarised one, ChatGPT-style — the raw
+   * question is only a stand-in until this lands. Fire-and-forget: it runs beside
+   * the answer stream and a failure just leaves the placeholder in place.
+   */
+  const nameConversation = useCallback((conversationId: string, question: string) => {
+    void generateTitle(question)
+      .then(({ title }) => {
+        if (!title) return;
+        setConversations((prev) =>
+          prev.map((c) => (c.id === conversationId ? { ...c, title } : c)),
+        );
+      })
+      .catch(() => {
+        // Titling is cosmetic — never surface it as a chat error.
+      });
+  }, []);
+
   const send = useCallback(
     (query: string) => {
       if (busy) return;
       const now = Date.now();
       const assistantId = createId();
+      const existing = conversations.find((c) => c.id === activeId);
+      // Everything the answer may draw on: this chat's files plus the ones being sent.
+      const sources = [...new Set([...(existing?.attachments ?? []), ...staged])];
       const turn: ChatMessage[] = [
-        { id: createId(), role: "user", content: query, createdAt: now },
+        {
+          id: createId(),
+          role: "user",
+          content: query,
+          createdAt: now,
+          // Only the newly staged files ride on this bubble — earlier ones are
+          // already shown on the message they arrived with.
+          ...(staged.length ? { attachments: staged } : {}),
+        },
         {
           id: assistantId,
           role: "assistant",
@@ -142,36 +184,40 @@ export function useChat() {
           prompt: query,
         },
       ];
+      setStaged([]);
 
-      const existing = conversations.find((c) => c.id === activeId);
       if (!existing) {
         // No active chat (fresh load, after New chat, or after deleting the last
         // one) — the conversation is created here, on the first real message.
         const fresh = createConversation();
         setConversations((prev) => [
-          { ...fresh, title: deriveTitle(query), messages: turn, updatedAt: now },
+          { ...fresh, title: deriveTitle(query), messages: turn, updatedAt: now, attachments: sources },
           ...prev,
         ]);
         setActiveId(fresh.id);
-        void runStream(fresh.id, query, assistantId);
+        nameConversation(fresh.id, query);
+        void runStream(fresh.id, query, assistantId, sources);
         return;
       }
 
+      const opening = existing.messages.length === 0; // an untitled chat, if one survives
       setConversations((prev) =>
         prev.map((c) =>
           c.id === existing.id
             ? {
                 ...c,
-                title: c.messages.length === 0 ? deriveTitle(query) : c.title,
+                title: opening ? deriveTitle(query) : c.title,
                 messages: [...c.messages, ...turn],
+                attachments: sources,
                 updatedAt: now,
               }
             : c,
         ),
       );
-      void runStream(existing.id, query, assistantId);
+      if (opening) nameConversation(existing.id, query);
+      void runStream(existing.id, query, assistantId, sources);
     },
-    [activeId, busy, conversations, runStream],
+    [activeId, busy, conversations, nameConversation, runStream, staged],
   );
 
   const regenerate = useCallback(
@@ -186,15 +232,43 @@ export function useChat() {
         feedback: undefined,
         streaming: true,
       });
-      void runStream(activeId, message.prompt, message.id);
+      // Replay against the same files the chat is scoped to.
+      void runStream(activeId, message.prompt, message.id, active?.attachments ?? []);
     },
-    [activeId, busy, patchMessage, runStream],
+    [active, activeId, busy, patchMessage, runStream],
   );
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
   /** Just detaches from the current chat — nothing is stored until a message is sent. */
-  const newChat = useCallback(() => setActiveId(null), []);
+  const newChat = useCallback(() => {
+    setActiveId(null);
+    setStaged([]); // a new chat starts with nothing attached
+  }, []);
+
+  /** Open an existing chat; anything staged but unsent is dropped. */
+  const selectChat = useCallback((id: string) => {
+    setActiveId(id);
+    setStaged([]);
+  }, []);
+
+  /** Stage freshly ingested files for the next message. */
+  const attach = useCallback((sources: string[]) => {
+    if (sources.length === 0) return;
+    setStaged((prev) => [...new Set([...prev, ...sources])]);
+  }, []);
+
+  /** Deleting a document is index-wide, so drop it from every chat that lists it. */
+  const detach = useCallback((source: string) => {
+    setStaged((prev) => prev.filter((s) => s !== source));
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.attachments.includes(source)
+          ? { ...c, attachments: c.attachments.filter((s) => s !== source) }
+          : c,
+      ),
+    );
+  }, []);
 
   const deleteChat = useCallback(
     (id: string) => {
@@ -207,8 +281,9 @@ export function useChat() {
   );
 
   const setFeedback = useCallback(
-    (messageId: string, rating: "up" | "down") => {
-      if (activeId) patchMessage(activeId, messageId, { feedback: rating });
+    (messageId: string, rating: "up" | "down" | null) => {
+      // null = the user un-clicked; `undefined` is how "no rating" is stored.
+      if (activeId) patchMessage(activeId, messageId, { feedback: rating ?? undefined });
     },
     [activeId, patchMessage],
   );
@@ -224,7 +299,11 @@ export function useChat() {
     stop,
     newChat,
     deleteChat,
-    setActiveId,
+    selectChat,
     setFeedback,
+    staged,
+    scope,
+    attach,
+    detach,
   };
 }

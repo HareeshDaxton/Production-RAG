@@ -48,8 +48,13 @@ export function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString();
 }
 
-/** Distinct sources cited anywhere in a conversation — the doc chips on its card. */
+/**
+ * The doc chips on a history card. Files actually attached to the chat win — they
+ * are what the user chose. Citations are only a fallback for chats recorded before
+ * attachments existed, where they'd otherwise show nothing.
+ */
 export function conversationDocuments(conversation: Conversation): string[] {
+  if (conversation.attachments?.length) return conversation.attachments;
   const sources = new Set<string>();
   for (const message of conversation.messages) {
     for (const citation of message.response?.citations ?? []) {

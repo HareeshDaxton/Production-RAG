@@ -1,17 +1,56 @@
 "use client";
 
-import { AlertCircle, Info } from "lucide-react";
+import { AlertCircle, FileText, Info } from "lucide-react";
 import { Markdown } from "@/components/markdown";
 import { MessageActions } from "@/components/message-actions";
 import { Sources } from "@/components/sources";
 import type { ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export function UserBubble({ content }: { content: string }) {
+/** Files sent with a question, shown as cards above it the way ChatGPT does. */
+function Attachments({ names }: { names: string[] }) {
+  return (
+    <ul className="mb-2 flex flex-wrap justify-end gap-2">
+      {names.map((name) => (
+        <li
+          key={name}
+          title={name}
+          className="flex items-center gap-2.5 rounded-xl border border-border bg-surface px-2.5 py-2"
+        >
+          <span
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background"
+            aria-hidden="true"
+          >
+            <FileText className="h-4 w-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block max-w-[13rem] truncate text-[12px] font-medium leading-tight">
+              {name}
+            </span>
+            <span className="block text-[10px] uppercase leading-tight tracking-wide text-muted-foreground">
+              {name.split(".").pop() || "file"}
+            </span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function UserBubble({
+  content,
+  attachments,
+}: {
+  content: string;
+  attachments?: string[];
+}) {
   return (
     <div className="flex items-start justify-end gap-3">
-      <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-4 py-2.5 text-[15px] leading-relaxed">
-        {content}
+      <div className="max-w-[80%] min-w-0">
+        {attachments?.length ? <Attachments names={attachments} /> : null}
+        <div className="rounded-2xl border border-border bg-surface px-4 py-2.5 text-[15px] leading-relaxed">
+          {content}
+        </div>
       </div>
       <span
         className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-[11px] font-medium text-muted-foreground"
@@ -31,7 +70,7 @@ export function AssistantBubble({
 }: {
   message: ChatMessage;
   busy: boolean;
-  onFeedback: (rating: "up" | "down") => void;
+  onFeedback: (rating: "up" | "down" | null) => void;
   onRegenerate: () => void;
 }) {
   const response = message.response;

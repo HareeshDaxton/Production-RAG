@@ -5,7 +5,7 @@ import { FileText, Lightbulb, MessageSquare, Plus, Search } from "lucide-react";
 import { Composer } from "@/components/composer";
 import { AssistantBubble, UserBubble } from "@/components/message";
 import { Button } from "@/components/ui/button";
-import type { ChatMessage, Conversation } from "@/lib/types";
+import type { ChatMessage, Conversation, IndexedDocument } from "@/lib/types";
 
 const SUGGESTIONS = [
   { icon: FileText, text: "Summarize the key findings in my uploaded research papers" },
@@ -24,16 +24,24 @@ export function ChatView({
   onNewChat,
   onOpenUpload,
   ready,
+  documents,
+  onRemoveDocument,
+  scope,
 }: {
   conversation: Conversation | null;
   busy: boolean;
   onSend: (query: string) => void;
   onStop: () => void;
   onRegenerate: (message: ChatMessage) => void;
-  onFeedback: (messageId: string, rating: "up" | "down") => void;
+  onFeedback: (messageId: string, rating: "up" | "down" | null) => void;
   onNewChat: () => void;
   onOpenUpload: () => void;
   ready: boolean;
+  /** Staged uploads — chips above the composer until the next message carries them. */
+  documents: IndexedDocument[];
+  onRemoveDocument: (source: string) => Promise<void>;
+  /** Every file this chat answers from, for the composer's scope line. */
+  scope: string[];
 }) {
   const messages = conversation?.messages ?? [];
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -100,7 +108,11 @@ export function ChatView({
           <div className="mx-auto max-w-3xl space-y-7 px-4 py-6 md:px-6">
             {messages.map((message) =>
               message.role === "user" ? (
-                <UserBubble key={message.id} content={message.content} />
+                <UserBubble
+                  key={message.id}
+                  content={message.content}
+                  attachments={message.attachments}
+                />
               ) : (
                 <AssistantBubble
                   key={message.id}
@@ -122,6 +134,9 @@ export function ChatView({
         onOpenUpload={onOpenUpload}
         busy={busy}
         disabled={!ready}
+        documents={documents}
+        onRemoveDocument={onRemoveDocument}
+        scope={scope}
       />
     </>
   );

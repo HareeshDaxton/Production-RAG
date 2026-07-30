@@ -17,6 +17,9 @@ export function loadConversations(): Conversation[] {
     if (!Array.isArray(parsed)) return [];
     return (parsed as Conversation[])
       .filter((c) => c && typeof c.id === "string" && Array.isArray(c.messages))
+      // `attachments` post-dates the first release — backfill so older chats
+      // don't crash the composer's chip filter.
+      .map((c) => ({ ...c, attachments: Array.isArray(c.attachments) ? c.attachments : [] }))
       .sort((a, b) => b.updatedAt - a.updatedAt);
   } catch {
     return [];
@@ -37,5 +40,12 @@ export function saveConversations(conversations: Conversation[]): void {
 
 export function createConversation(): Conversation {
   const now = Date.now();
-  return { id: createId(), title: "New chat", createdAt: now, updatedAt: now, messages: [] };
+  return {
+    id: createId(),
+    title: "New chat",
+    createdAt: now,
+    updatedAt: now,
+    messages: [],
+    attachments: [],
+  };
 }

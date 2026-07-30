@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Paperclip, SendHorizonal, Square } from "lucide-react";
+import { DocumentChips } from "@/components/document-chips";
 import { Button } from "@/components/ui/button";
+import type { IndexedDocument } from "@/lib/types";
 
 const MAX_HEIGHT_PX = 200;
 
@@ -12,12 +14,18 @@ export function Composer({
   onOpenUpload,
   busy,
   disabled,
+  documents,
+  onRemoveDocument,
+  scope,
 }: {
   onSubmit: (query: string) => void;
   onStop: () => void;
   onOpenUpload: () => void;
   busy: boolean;
   disabled?: boolean;
+  documents: IndexedDocument[];
+  onRemoveDocument: (source: string) => Promise<void>;
+  scope: string[];
 }) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -40,6 +48,7 @@ export function Composer({
 
   return (
     <div className="px-4 pb-4 md:px-6">
+      <DocumentChips documents={documents} onRemove={onRemoveDocument} />
       <div className="mx-auto max-w-3xl">
         <div className="flex items-end gap-2 rounded-2xl border border-border bg-surface px-3 py-2.5 transition-colors duration-200 focus-within:border-accent/50">
           <Button
@@ -94,8 +103,15 @@ export function Composer({
           )}
         </div>
 
+        {/* Attaching files narrows retrieval to them — say so, rather than letting
+            the scope change silently. */}
         <p className="mt-2 text-center text-[11px] text-muted-foreground/70">
-          Retrieves from indexed documents only · Shift+Enter for newline
+          {scope.length === 1
+            ? `Answering from ${scope[0]}`
+            : scope.length > 1
+              ? `Answering from ${scope.length} attached files`
+              : "Retrieves from indexed documents only"}{" "}
+          · Shift+Enter for newline
         </p>
       </div>
     </div>
