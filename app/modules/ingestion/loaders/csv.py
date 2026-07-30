@@ -21,10 +21,37 @@ from app.modules.ingestion.loaders.base import (
 )
 
 
+def _normalise_header(header: list[str]) -> list[str]:
+    """Give every column a name.
+
+    Spreadsheet exports routinely merge header cells — one "Identifier" spanning three
+    columns leaves two blanks — and a blank name renders as a bare ": value", which is
+    noise to both the embedder and the reader. Blanks inherit the last named column
+    with a positional suffix ("Identifier 2"), so every field stays addressable.
+    """
+    named: list[str] = []
+    last, run = "", 1
+    for i, raw in enumerate(header):
+        name = raw.strip()
+        if name:
+            last, run = name, 1
+        elif last:
+            run += 1
+            name = f"{last} {run}"
+        else:
+            name = f"column{i + 1}"
+        named.append(name)
+    return named
+
+
 def _render_row(header: list[str], row: list[str]) -> str:
+    """`col: value` pairs, skipping empty cells — a blank carries no information."""
     pairs = []
-    for i, value in enumerate(row):
-        col = header[i] if i < len(header) else f"col{i + 1}"
+    for i, raw in enumerate(row):
+        value = raw.strip()
+        if not value:
+            continue
+        col = header[i] if i < len(header) else f"column{i + 1}"
         pairs.append(f"{col}: {value}")
     return " | ".join(pairs)
 
@@ -36,7 +63,7 @@ def load(path: Path, rel: str) -> Document | None:
     if not rows:
         return None
 
-    header = [h.strip() for h in rows[0]]
+    header = _normalise_header(rows[0])
     data = rows[1:]
     if not data:
         return None
