@@ -5,6 +5,7 @@ import type {
   IngestResponse,
   StreamEvent,
   SystemInfo,
+  TitleResponse,
 } from "@/lib/types";
 
 export const API_BASE_URL =
@@ -140,8 +141,46 @@ export function getSystemInfo(): Promise<SystemInfo> {
   return getJson<SystemInfo>("/v1/system");
 }
 
-/** Thumbs ratings; a thumbs-down also enqueues a Phase 6 auto-eval candidate. */
-export async function sendFeedback(query: string, rating: "up" | "down"): Promise<void> {
+/** Remove a document from the index (drops its chunks and rebuilds BM25). */
+export async function deleteDocument(source: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/v1/documents/${encodeURIComponent(source)}`, {
+      method: "DELETE",
+    });
+  } catch {
+    throw new ApiError(UNREACHABLE, 0);
+  }
+  if (!res.ok) throw await failure(res);
+}
+
+/**
+ * Name a conversation from its first question. Cheap and independent of the answer
+ * stream, so a slow or failed title never delays the reply.
+ */
+export async function generateTitle(question: string): Promise<TitleResponse> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/v1/title`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+  } catch {
+    throw new ApiError(UNREACHABLE, 0);
+  }
+  if (!res.ok) throw await failure(res);
+  return (await res.json()) as TitleResponse;
+}
+
+/**
+ * Thumbs ratings; a thumbs-down also enqueues a Phase 6 auto-eval candidate, and
+ * "retracted" (an un-click) withdraws it again if review hasn't started.
+ */
+export async function sendFeedback(
+  query: string,
+  rating: "up" | "down" | "retracted",
+): Promise<void> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}/v1/feedback`, {

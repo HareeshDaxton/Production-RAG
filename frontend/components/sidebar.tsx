@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -9,7 +8,6 @@ import {
   MessageSquare,
   Sun,
 } from "lucide-react";
-import { getSystemInfo } from "@/lib/api";
 import type { SystemInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/use-theme";
@@ -28,6 +26,7 @@ export function Sidebar({
   onToggleCollapse,
   mobileOpen,
   onCloseMobile,
+  system,
 }: {
   view: View;
   onView: (view: View) => void;
@@ -35,15 +34,10 @@ export function Sidebar({
   onToggleCollapse: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  /** Shared with the composer's chips so the counts can never disagree. */
+  system: SystemInfo | null;
 }) {
   const { theme, toggle } = useTheme();
-  const [system, setSystem] = useState<SystemInfo | null>(null);
-
-  useEffect(() => {
-    getSystemInfo()
-      .then(setSystem)
-      .catch(() => setSystem(null)); // backend down — panel just stays quiet
-  }, []);
 
   // The toggle is labelled with the mode it switches TO.
   const nextThemeLabel = theme === "dark" ? "Light Mode" : "Dark Mode";

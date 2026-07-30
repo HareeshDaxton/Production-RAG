@@ -14,7 +14,16 @@ const ACCEPT = [
   ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp", ".gif",
 ].join(",");
 
-export function UploadDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function UploadDialog({
+  open,
+  onClose,
+  onIngested,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Receives the ingested `source` values (the backend keys documents by basename). */
+  onIngested?: (sources: string[]) => void | Promise<void>;
+}) {
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,9 +54,13 @@ export function UploadDialog({ open, onClose }: { open: boolean; onClose: () => 
     if (files.length === 0 || busy) return;
     setBusy(true);
     setError(null);
+    // `ingest_files` flattens uploads to their basename, so that is the `source`
+    // the index (and therefore the chip list) will be keyed by.
+    const sources = files.map((f) => f.name.split(/[\\/]/).pop() || f.name);
     try {
       setResult(await uploadDocuments(files, false));
       setFiles([]);
+      await onIngested?.(sources); // refresh the sidebar counts and composer chips
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Upload failed");
     } finally {
@@ -158,11 +171,21 @@ export function UploadDialog({ open, onClose }: { open: boolean; onClose: () => 
           </p>
         ) : null}
 
+        {busy ? (
+          /* Scanned pages go through OCR on the CPU, which is slow enough that
+             silence reads as a hang. Say so instead of spinning wordlessly. */
+          <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+            Extracting text, then embedding each chunk. Scanned pages are OCR&rsquo;d,
+            which can take up to a minute per page — large or image-heavy PDFs take a
+            while.
+          </p>
+        ) : null}
+
         <Button
           variant="primary"
           size="md"
-          onClick={submit}
-          disabled={files.length === 0 || busy}
+          onClick={result ? onClose : submit}
+          disabled={busy || (!result && files.length === 0)}
           className="mt-4 w-full"
         >
           {busy ? (
@@ -170,6 +193,8 @@ export function UploadDialog({ open, onClose }: { open: boolean; onClose: () => 
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               Ingesting…
             </>
+          ) : result ? (
+            "Done"
           ) : (
             "Ingest files"
           )}
