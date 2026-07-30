@@ -21,7 +21,7 @@ originals: dashboard → **Phase 8**, service split → **Phase 9**.
 - Phase 5 — Semantic cache (Redis) — ✅
 - Phase 6 — Auto-eval loop — ✅
 - Phase 7 — Multi-format ingestion (9 types) + metadata + filtered retrieval — ✅ (was M1–M6)
-- Phase 8 — API polish + Streamlit dashboard — ⏳ deferred
+- Phase 8 — API polish + **Next.js chat frontend** — 🔄 in progress (Streamlit dropped, user call)
 - Phase 9 — Service split + Postgres/pgvector — ⏳ deferred
 
 ## Environment
@@ -257,12 +257,77 @@ originals: dashboard → **Phase 8**, service split → **Phase 9**.
   `C:\Users\hareesh\AppData\Local\Programs\Python\Python312\Scripts\uv.exe` (not on PATH). The earlier
   ChromaDB native-DLL load failure (missing MSVC runtime) is **resolved** — the full fast suite incl.
   `test_ready_endpoint` is green.
-- **Phase 8 (deferred)** — API surface polish + Streamlit dashboard (query UI, citations, confidence,
-  hybrid-vs-dense toggle, cache panel, eval + review-queue views).
+- **PHASE 8 — API polish + Next.js chat frontend — 🔄 IN PROGRESS.** Streamlit was dropped on the
+  user's call ("looks like a basic school project"); the UI is a ChatGPT-style chat app in
+  `frontend/` (Next.js 15.5 App Router, React 19, TS strict, Tailwind v4, **strictly black & white**
+  palette — status is conveyed by icon + contrast ramp, never hue). Wordmark = "Medical Research
+  Assistant". History lives in `localStorage` (the backend is stateless — no thread concept).
+  - **Backend additions:** `POST /v1/ask/stream` (real SSE token streaming via `instructor`
+    `create_partial`; `meta` → `delta`* → terminal `final` frame that is authoritative, with
+    `replaced: true` when the IDK gate swapped the streamed draft) · `CorsConfig` + `CORSMiddleware`
+    (`cors.*`) · `GET /v1/documents` (distinct sources aggregated from Chroma chunk metadata, since
+    `ingestion_audit` only records directories) · `GET /v1/system` (model wiring + corpus size) ·
+    `DELETE /v1/documents/{source:path}` (drops chunks, rebuilds BM25, records a `delete:` audit row
+    so `corpus_version` bumps and the semantic cache can't serve the deleted doc) ·
+    **`POST /v1/title`** (`app/routers/title.py` + `generator.generate_title`): names a chat from its
+    first question ChatGPT-style ("How do I install FastAPI on Windows?" → "FastAPI Setup on
+    Windows") — few-shot prompt in `prompt.TITLE_SYSTEM_PROMPT`, config `models.title.*`
+    (`enabled/name/temperature/max_words/max_tokens/max_chars`), never raises: any failure or
+    `enabled: false` degrades to a trimmed question.
+  - **Feedback is now toggleable** (Phase 6 contract change): `FeedbackRequest.rating` accepts
+    `up|down|**retracted**`, and any non-`down` rating calls `db.withdraw_thumbs_down(query)` →
+    still-`pending` `thumbs_down` candidates become status **`withdrawn`** (rows already drafted or
+    reviewed are left alone). The `feedback` table stays append-only — a retraction is a new row, so
+    the audit keeps both the vote and the change of mind.
+  - **Frontend conventions:** conversations are created lazily on the first message (the "always ≥1
+    conversation" invariant is what broke delete); file chips are **scoped per conversation**
+    (`Conversation.attachments`) so a new chat starts clean, while the index behind them stays
+    corpus-wide; `useDocuments()` is the single source for sidebar counts + chips so they can never
+    disagree; titling is fire-and-forget beside the answer stream.
+  - **Attachments scope retrieval.** Files uploaded in a chat are sent as `filters.source` (a list),
+    so "tell me about the csv" searches that file instead of losing to the rest of the corpus. They
+    render as cards above the question (`ChatMessage.attachments`); composer chips are staged
+    uploads only, and the composer footer names the scope.
+  - Remaining Phase 8 ideas (not built): cache panel, eval + review-queue views, retrieval controls.
 - **Phase 9 (deferred)** — hard split into services + Postgres/pgvector migration (modular monolith
   → real services; vectors/metadata move off ChromaDB+SQLite).
 
 ## Update log
+- 2026-07-30: **Attachment-scoped retrieval + three defects that made structured files
+  unanswerable.** Reported as "I uploaded a CSV and it says no information". Root causes, all fixed:
+  (1) **retrieval wasn't scoped** to the uploaded file, so a vague question about a CSV lost to the
+  prose already in the corpus → `RetrievalFilters.source` now takes a **list** (`build_where` emits
+  `$in`, `metadata_matches` does membership, `_filters_key` sorts list values so scope order doesn't
+  split the cache), and the UI sends the chat's attachments as `filters.source`;
+  (2) **`retrieval_confidence` was structurally ~0 for structured chunks** — the cross-encoder scores
+  CSV/JSON/XML records at −7..−11 however relevant they are (measured), and sigmoid(−8)≈0.0003 put
+  every such answer under the 0.45 IDK gate → `hybrid_retrieve` now scores confidence for
+  `content_type in {row,object,element}` from the **dense cosine** instead (ranking still uses the
+  reranker), behind `retrieval.structured_confidence_from_dense`;
+  (3) **`citation_accuracy` was 0 whenever the model wrote no inline `[n]`** — summary-style answers
+  declare sources in `citations_used` and cite nothing in the prose, so a grounded answer scored as
+  unsourced and got replaced by the IDK text → new `extractor.citations_from_declared`, used by
+  `assess(..., declared=gen.citations_used)` only when nothing inline was found.
+  Also: CSV loader names merged/blank header columns (`Identifier 2`) instead of emitting `": value"`,
+  skips empty cells, and `read_text` uses `utf-8-sig` so an Excel BOM stops gluing itself to the first
+  column name. Live: the same question on the user's `patient.csv` went **IDK (0.18) → answered
+  (0.727)**. Frontend: attachments now ride on the **message** (`ChatMessage.attachments`, cards above
+  the question like ChatGPT), the composer chips are **staged** uploads only, the footer names the
+  scope ("Answering from patient.csv"), and history cards prefer attached files over cited sources.
+  12 new fast tests → **72 fast green**, ruff clean.
+- 2026-07-30: **Phase 8 in progress — conversation titling + per-chat file chips.** Added
+  `POST /v1/title` (`app/routers/title.py`, `generator.{generate_title,fallback_title,_clean_title}`,
+  `prompt.TITLE_SYSTEM_PROMPT` + `build_title_prompt`, `GeneratedTitle`, `TitleRequest/TitleResponse`,
+  `models.title` config) so chats are named by topic instead of echoing the question — the reported
+  bug. Frontend: `Conversation.attachments` scopes file chips to the chat they were uploaded from
+  (New Chat starts clean); `generateTitle()` patches the placeholder title in-place, fire-and-forget.
+  Also fixed: thumbs up/down were locked after the first click — they now **toggle**, which needed a
+  Phase 6 contract change (`rating: "retracted"`, `db.withdraw_thumbs_down`, new `withdrawn`
+  candidate status) so the review queue follows the vote instead of keeping a retracted dislike.
+  Earlier in the same push: `/v1/ask/stream`, CORS, `/v1/documents`, `/v1/system`,
+  `DELETE /v1/documents/{source}`, `useDocuments()` shared state. Tests `tests/test_title.py`
+  (7 fast) + 4 in `test_autoeval.py` → **60 fast green**, ruff clean. Status header rewritten:
+  Phase 8 is no longer "deferred / Streamlit".
 - 2026-07-25: **Phase renumbering → canonical 0–9.** Folded the completed multi-format ingestion work
   (formerly the unnumbered "Ingestion-v2 / M1–M6 track") in as the official **Phase 7**; renumbered the
   two remaining originals: dashboard → **Phase 8**, service split + Postgres/pgvector → **Phase 9**.
