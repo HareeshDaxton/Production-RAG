@@ -59,8 +59,12 @@ def register(format_name: str, *suffixes: str) -> Callable[[Loader], Loader]:
 
 
 def read_text(path: Path) -> str:
-    """Decode a file as UTF-8, replacing undecodable bytes (never raises on encoding)."""
-    return path.read_bytes().decode("utf-8", errors="replace")
+    """Decode a file as UTF-8, replacing undecodable bytes (never raises on encoding).
+
+    `utf-8-sig` strips a byte-order mark if one is present — Excel writes BOMs, and an
+    unstripped one glues itself to the first CSV column name ("﻿Id").
+    """
+    return path.read_bytes().decode("utf-8-sig", errors="replace")
 
 
 def filename_title(path: Path) -> str:
