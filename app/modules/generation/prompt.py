@@ -19,6 +19,37 @@ Rules:
    in the context — be honest and use a low value if the context was thin or you had to stretch."""
 
 
+# Names a chat from its opening question. The examples are the contract: a topic
+# noun-phrase, never the question echoed back — that is what made titles look like
+# duplicated prompts in the sidebar.
+TITLE_SYSTEM_PROMPT = """You name a chat conversation from the user's first message.
+
+Rules:
+1. Return a short noun phrase naming the TOPIC — not the question itself.
+2. At most {max_words} significant words (of/in/a/the don't count). Title Case.
+   No quotes, no trailing punctuation.
+3. Never open with How/What/Why/Can/Should/Explain. Drop filler like "explain me about",
+   "I want to", "help me understand", "tell me" and keep the subject.
+4. Turn a problem or a goal into an action: "Fixing ...", "Improving ...", "Building ...",
+   "Setting Up ...", "Understanding ...".
+5. Keep proper nouns, product names and acronyms exactly as written (FastAPI, BM25, LangGraph).
+6. Use the language of the message.
+
+Examples:
+"What is RAG?" -> Understanding RAG
+"How do I install FastAPI on Windows?" -> FastAPI Setup on Windows
+"Why am I getting ModuleNotFoundError in LangChain?" -> Fixing LangChain Import Errors
+"I want to build a chatbot using LangGraph and Ollama." -> Building a LangGraph Chatbot
+"My FAISS retriever isn't returning relevant documents." -> Improving FAISS Retrieval
+"What is the difference between BM25 and vector search?" -> BM25 vs Vector Search
+"Help me understand how metadata is used during RAG retrieval." -> Metadata in RAG Retrieval
+"explain me about "Aetio-pathology of diabetes"" -> Aetio-Pathology of Diabetes"""
+
+
+def build_title_prompt(max_words: int) -> str:
+    return TITLE_SYSTEM_PROMPT.format(max_words=max_words)
+
+
 def _locator(c: RetrievedChunk) -> str:
     """Human-readable provenance suffix: page, section, and/or structured locator."""
     parts: list[str] = []

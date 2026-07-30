@@ -4,6 +4,14 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class GeneratedTitle(BaseModel):
+    title: str = Field(
+        ...,
+        description="Short Title Case noun phrase naming the conversation's topic. "
+        "No quotes, no trailing punctuation, never the question echoed back.",
+    )
+
+
 class GeneratedAnswer(BaseModel):
     answer: str = Field(
         ..., description="Answer grounded ONLY in the context, with inline [n] citations."
