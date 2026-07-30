@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from app.config import ConfidenceWeights, get_settings
+from app.config import ConfidenceWeights, get_config, get_settings
 from app.modules.quality.confidence import citation_accuracy, composite_confidence
-from app.modules.quality.extractor import extract_citations
+from app.modules.quality.extractor import citations_from_declared, extract_citations
 from app.modules.quality.verifier import CitationCheck
 from app.modules.retrieval.dense import RetrievedChunk
 
@@ -36,6 +36,41 @@ def test_extract_drops_out_of_range_markers():
     chunks = [_chunk(1, "only one chunk")]
     got = extract_citations("Bogus reference [5] and valid [1].", chunks)
     assert [c.number for c in got] == [1]
+
+
+def test_declared_citations_rescue_an_answer_with_no_inline_markers():
+    """Summary answers cite in `citations_used` but write no `[n]` in the prose.
+
+    Scoring those as unsourced drove citation accuracy to 0 and the IDK gate then
+    replaced a perfectly grounded answer with "I don't have enough information".
+    """
+    chunks = [_chunk(1, "Id: 1 | gender: female"), _chunk(2, "Id: 2 | gender: male")]
+    answer = "The file lists patients with an id and a gender."
+
+    assert extract_citations(answer, chunks) == []  # nothing inline to find
+
+    got = citations_from_declared([2, 1, 2], answer, chunks)
+    assert [c.number for c in got] == [1, 2]  # deduped and ordered
+    assert all(c.claim == answer for c in got)  # whole answer is the claim
+    assert got[1].source_text == "Id: 2 | gender: male"
+
+
+def test_declared_citations_drop_out_of_range_numbers():
+    chunks = [_chunk(1, "only one chunk")]
+    assert [c.number for c in citations_from_declared([1, 7], "text", chunks)] == [1]
+
+
+def test_inline_markers_win_over_declared(monkeypatch):
+    """The fallback must not fire when the model did cite inline."""
+    from app.modules.quality import service
+
+    chunks = [_chunk(1, "a"), _chunk(2, "b")]
+    monkeypatch.setattr(get_config().quality, "verify_citations", False)
+    report = service.assess(
+        "q", "Grounded claim [1].", chunks, self_confidence=0.9,
+        retrieval_confidence=0.8, declared=[1, 2],
+    )
+    assert report.citation_accuracy == 1.0  # extracted, not rebuilt from `declared`
 
 
 def test_build_context_shows_page_and_section():
