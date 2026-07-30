@@ -1,6 +1,7 @@
 """Phase 2: RRF fusion (fast), plus hybrid/sparse/chunking behaviour (slow, loads models)."""
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ import pytest
 from app.config import ChunkingConfig
 from app.modules.ingestion.chunker import chunk_document
 from app.modules.ingestion.loader import Block, Document
+from app.modules.retrieval.dense import RetrievedChunk
 from app.modules.retrieval.fusion import reciprocal_rank_fusion
 
 SAMPLE_DOCS = Path(__file__).resolve().parent.parent / "sample_docs"
@@ -33,6 +35,59 @@ def test_rrf_weight_shifts_ranking():
     # Heavily weighting sparse should put its top item ("y") first.
     fused = reciprocal_rank_fusion([dense, sparse], weights=[0.1, 5.0], k=60)
     assert fused[0][0] == "y"
+
+
+# --- fast: confidence source depends on content type (no models) --------------
+
+
+class _FakeReranker:
+    """Returns a fixed cross-encoder logit for every candidate."""
+
+    def __init__(self, score: float):
+        self._score = score
+
+    def rerank(self, _query, candidates, top_k):
+        return [(cid, self._score) for cid, _ in candidates][:top_k]
+
+
+def _wire(monkeypatch, chunk, rerank_score: float):
+    from app.modules.retrieval import hybrid
+
+    monkeypatch.setattr(hybrid, "dense_retrieve", lambda *a, **k: [chunk])
+    monkeypatch.setattr(hybrid, "sparse_retrieve", lambda *a, **k: [])
+    monkeypatch.setattr(hybrid, "get_reranker", lambda: _FakeReranker(rerank_score))
+    return hybrid
+
+
+def _chunk(content_type: str, cosine: float) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id="c1", text="Id: 1 | name: Ada", source="p.csv",
+        section_path="", score=cosine, content_type=content_type,
+    )
+
+
+def test_structured_confidence_comes_from_the_cosine_not_the_cross_encoder(monkeypatch):
+    """CSV/JSON/XML records are out of distribution for `ms-marco-MiniLM`: it scores
+    them ~-8 however relevant they are, and sigmoid(-8) ≈ 0 made the quality gate
+    refuse every question about a structured file."""
+    hybrid = _wire(monkeypatch, _chunk("row", 0.82), rerank_score=-8.0)
+    _, confidence = hybrid.hybrid_retrieve("what does this data say", top_k=1)
+    assert confidence == 0.82
+
+
+def test_prose_confidence_still_comes_from_the_cross_encoder(monkeypatch):
+    hybrid = _wire(monkeypatch, _chunk("text", 0.82), rerank_score=2.0)
+    _, confidence = hybrid.hybrid_retrieve("what is attention", top_k=1)
+    assert confidence == round(1 / (1 + math.exp(-2.0)), 4)
+
+
+def test_structured_fallback_can_be_switched_off(monkeypatch):
+    from app.config import get_config
+
+    monkeypatch.setattr(get_config().retrieval, "structured_confidence_from_dense", False)
+    hybrid = _wire(monkeypatch, _chunk("row", 0.82), rerank_score=-8.0)
+    _, confidence = hybrid.hybrid_retrieve("what does this data say", top_k=1)
+    assert confidence < 0.01  # back to sigmoid(-8)
 
 
 # --- fast: block-based chunking carries per-chunk metadata (no models) --------
