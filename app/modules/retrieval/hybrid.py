@@ -17,7 +17,7 @@ from dataclasses import replace
 from app.clients.reranker import get_reranker
 from app.config import get_config
 from app.logging_config import get_logger
-from app.modules.retrieval.confidence import retrieval_confidence
+from app.modules.retrieval.confidence import is_structured, retrieval_confidence
 from app.modules.retrieval.dense import RetrievedChunk, dense_retrieve
 from app.modules.retrieval.filters import Filters
 from app.modules.retrieval.fusion import reciprocal_rank_fusion
@@ -56,7 +56,23 @@ def hybrid_retrieve(
     reranked = get_reranker().rerank(query, candidates, top_k)  # [(id, score)] desc
     # Carry all per-chunk metadata forward; only the score changes (cross-encoder relevance).
     results = [replace(pool[cid], score=score) for cid, score in reranked]
-    confidence = retrieval_confidence([s for _, s in reranked], kind="cross_encoder")
+
+    # Ranking still uses the cross-encoder, but *confidence* can't: it scores records
+    # (CSV rows, JSON objects, XML elements) at ~-8 regardless of relevance, which the
+    # sigmoid turns into ~0 and the quality gate then reads as "no evidence" — every
+    # question about a structured file was refused. Score those from the dense cosine,
+    # which is in-distribution for them, and leave prose on the cross-encoder.
+    dense_scores = {h.chunk_id: h.score for h in dense_hits}
+    top = results[0] if results else None
+    if (
+        cfg.structured_confidence_from_dense
+        and top is not None
+        and is_structured(top.content_type)
+        and top.chunk_id in dense_scores
+    ):
+        confidence = retrieval_confidence([dense_scores[top.chunk_id]], kind="similarity")
+    else:
+        confidence = retrieval_confidence([s for _, s in reranked], kind="cross_encoder")
     logger.info(
         "hybrid retrieval",
         extra={

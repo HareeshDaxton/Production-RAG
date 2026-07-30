@@ -10,6 +10,16 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
+# Chunks that are records rather than prose. The cross-encoder (`ms-marco-MiniLM`) is
+# trained on natural-language passages, so it scores these around -7..-11 however
+# relevant they are — a sigmoid of that is ~0, which would refuse every question about
+# a CSV/JSON/XML file. For them the dense cosine is the honest signal.
+STRUCTURED_CONTENT_TYPES = frozenset({"row", "object", "element"})
+
+
+def is_structured(content_type: str | None) -> bool:
+    return (content_type or "") in STRUCTURED_CONTENT_TYPES
+
 
 def _sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
