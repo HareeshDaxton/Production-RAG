@@ -81,11 +81,11 @@ class Citation(BaseModel):
 
 
 class RetrievalFilters(BaseModel):
-    """Equality filters applied to chunk metadata before ranking (M6).
+    """Filters applied to chunk metadata before ranking (M6).
 
     Unknown keys are rejected so a typo fails loudly instead of silently matching
     nothing. Substring/section filtering is intentionally out of scope — Chroma's
-    metadata `where` supports equality, not substring, on metadata fields.
+    metadata `where` supports equality and membership, not substring.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -93,14 +93,21 @@ class RetrievalFilters(BaseModel):
     file_type: str | None = Field(
         default=None, description="pdf|docx|csv|json|xml|html|txt|markdown|image"
     )
-    source: str | None = Field(default=None, description="Exact source path/filename.")
+    source: str | list[str] | None = Field(
+        default=None,
+        description="Exact source filename, or a list of them (matches any) — this is "
+        "how a chat scopes a question to the files attached to it.",
+    )
     content_type: str | None = Field(
         default=None, description="text|table|row|object|element|ocr|code"
     )
 
-    def as_dict(self) -> dict[str, str]:
-        """Active (non-None) filters as a flat equality dict."""
-        return {k: v for k, v in self.model_dump().items() if v is not None}
+    def as_dict(self) -> dict[str, str | list[str]]:
+        """Active (non-None) filters. A one-item list collapses to a plain equality."""
+        # An empty list means "no constraint", not "match nothing" — drop it, or
+        # Chroma would be handed an `$in: []` that can never match.
+        active = {k: v for k, v in self.model_dump().items() if v is not None and v != []}
+        return {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in active.items()}
 
 
 class AskRequest(BaseModel):
@@ -111,6 +118,17 @@ class AskRequest(BaseModel):
     )
     filters: RetrievalFilters | None = Field(
         default=None, description="Restrict retrieval to chunks matching these metadata equalities."
+    )
+
+
+class TitleRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=2000)
+
+
+class TitleResponse(BaseModel):
+    title: str
+    generated: bool = Field(
+        default=True, description="False when the title is a fallback trim of the question."
     )
 
 

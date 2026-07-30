@@ -15,6 +15,7 @@ from app.models.schemas import (
 )
 from app.modules.ingestion.loader import allowed_suffixes
 from app.modules.ingestion.service import (
+    delete_document,
     ingest_directory,
     ingest_files,
     list_indexed_documents,
@@ -68,6 +69,15 @@ def documents() -> DocumentsResponse:
         documents=[IndexedDocumentOut(**vars(d)) for d in docs],
         total_chunks=sum(d.chunks for d in docs),
     )
+
+
+@router.delete("/documents/{source:path}")
+def remove_document(source: str) -> dict:
+    """Drop a document from the index. `:path` so sources with slashes still match."""
+    removed = delete_document(source)
+    if removed == 0:
+        raise HTTPException(status_code=404, detail=f"document not indexed: {source}")
+    return {"deleted": True, "source": source, "chunks_removed": removed}
 
 
 @router.get("/system", response_model=SystemResponse)

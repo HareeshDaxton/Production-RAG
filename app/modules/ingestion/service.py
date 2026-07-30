@@ -33,6 +33,27 @@ class IndexedDocument:
     pages: int | None  # highest page seen (paginated sources only)
 
 
+def delete_document(source: str) -> int:
+    """Remove every chunk belonging to one source. Returns the count deleted.
+
+    The BM25 index is rebuilt afterwards — it is a snapshot of the collection, so
+    skipping the rebuild would leave keyword search matching deleted documents.
+    """
+    collection = get_chunks_collection()
+    existing = collection.get(where={"source": source}, include=[])
+    ids = existing.get("ids") or []
+    if not ids:
+        return 0
+
+    collection.delete(ids=ids)
+    rebuild_bm25_index()
+    # Deleting changes what is retrievable, so cached answers built from this
+    # document must not keep being served.
+    record_ingestion(f"delete:{source}", 0, 0)
+    logger.info("document deleted", extra={"source": source, "chunks": len(ids)})
+    return len(ids)
+
+
 def list_indexed_documents() -> list[IndexedDocument]:
     """Distinct documents currently in the chunk collection.
 
