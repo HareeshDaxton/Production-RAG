@@ -51,9 +51,20 @@ models:
     name: gpt-4o-mini
     temperature: 0.0
 
+  # Conversation naming (one ~30-token call per new chat). enabled: false = trimmed question.
+  title:
+    enabled: true
+    provider: openai
+    name: gpt-4o-mini
+    temperature: 0.3
+    max_words: 5
+    max_tokens: 48
+    max_chars: 60
+
 retrieval:
   default_top_k: 5              # final chunks handed to generation
   mode: hybrid                  # hybrid (dense+BM25+RRF+rerank) | dense (Phase 1 path). Per-request override via AskRequest.mode
+  structured_confidence_from_dense: true  # CSV/JSON/XML score ~0 on the cross-encoder → use cosine
   dense_candidates: 20          # dense pool size before fusion
   sparse_candidates: 20         # BM25 pool size before fusion
   rrf_k: 60                     # Reciprocal Rank Fusion damping constant

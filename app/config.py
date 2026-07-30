@@ -86,11 +86,24 @@ class JudgeConfig(BaseModel):
     temperature: float = 0.0
 
 
+class TitleConfig(BaseModel):
+    """Cheap model that names a conversation from its first question (ChatGPT-style)."""
+
+    enabled: bool = True  # False = fall back to a trimmed question, no LLM call
+    provider: str = "openai"
+    name: str = "gpt-4o-mini"
+    temperature: float = 0.3  # a little latitude produces better phrasing than 0.0
+    max_words: int = 5
+    max_tokens: int = 48  # a title is a handful of tokens; cap the cost hard
+    max_chars: int = 60  # hard truncation guard for the sidebar/header
+
+
 class ModelsConfig(BaseModel):
     embedding: EmbeddingConfig = EmbeddingConfig()
     reranker: RerankerConfig = RerankerConfig()
     generation: GenerationConfig = GenerationConfig()
     judge: JudgeConfig = JudgeConfig()
+    title: TitleConfig = TitleConfig()
 
 
 class RetrievalConfig(BaseModel):
@@ -102,6 +115,10 @@ class RetrievalConfig(BaseModel):
     dense_weight: float = 1.0  # RRF weight for the dense ranking
     sparse_weight: float = 1.0  # RRF weight for the BM25 ranking
     rerank_candidates: int = 20  # fused candidates fed to the cross-encoder reranker
+    # Structured records (CSV/JSON/XML) are out of distribution for the cross-encoder,
+    # which scores them ~0 and makes the quality gate refuse them. Confidence for those
+    # comes from the dense cosine instead; ranking still uses the reranker.
+    structured_confidence_from_dense: bool = True
 
 
 class ChunkingConfig(BaseModel):
