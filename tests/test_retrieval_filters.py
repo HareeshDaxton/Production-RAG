@@ -35,6 +35,16 @@ def test_build_where_shapes():
     assert where == {"$and": [{"file_type": "pdf"}, {"source": "g.pdf"}]}
 
 
+def test_build_where_uses_in_for_several_sources():
+    """A chat scoped to two attached files must match either of them."""
+    assert build_where({"source": ["a.csv", "b.pdf"]}) == {
+        "source": {"$in": ["a.csv", "b.pdf"]}
+    }
+    assert build_where({"file_type": "csv", "source": ["a.csv", "b.csv"]}) == {
+        "$and": [{"file_type": "csv"}, {"source": {"$in": ["a.csv", "b.csv"]}}]
+    }
+
+
 # --- metadata_matches ---------------------------------------------------------
 
 
@@ -45,6 +55,12 @@ def test_metadata_matches():
     assert metadata_matches(meta, {"file_type": "csv"}) is True
     assert metadata_matches(meta, {"file_type": "pdf"}) is False
     assert metadata_matches(meta, {"file_type": "csv", "source": "other.csv"}) is False
+
+
+def test_metadata_matches_membership():
+    meta = {"file_type": "csv", "source": "data.csv"}
+    assert metadata_matches(meta, {"source": ["data.csv", "other.pdf"]}) is True
+    assert metadata_matches(meta, {"source": ["other.pdf"]}) is False
 
 
 # --- sparse post-filter -------------------------------------------------------
@@ -99,6 +115,22 @@ def test_same_filters_hash_stable_regardless_of_order():
 def test_retrieval_filters_as_dict_drops_none():
     f = RetrievalFilters(file_type="pdf")
     assert f.as_dict() == {"file_type": "pdf"}
+
+
+def test_source_list_collapses_to_equality_and_empty_is_dropped():
+    """One file is an equality, not a one-element `$in`; none is no constraint."""
+    assert RetrievalFilters(source=["only.csv"]).as_dict() == {"source": "only.csv"}
+    assert RetrievalFilters(source=["a.csv", "b.pdf"]).as_dict() == {
+        "source": ["a.csv", "b.pdf"]
+    }
+    assert RetrievalFilters(source=[]).as_dict() == {}
+
+
+def test_source_order_does_not_split_the_cache():
+    a = params_hash(5, "hybrid", {"source": ["a.csv", "b.pdf"]})
+    b = params_hash(5, "hybrid", {"source": ["b.pdf", "a.csv"]})
+    assert a == b
+    assert a != params_hash(5, "hybrid", {"source": ["a.csv"]})
 
 
 def test_ask_request_rejects_unknown_filter_key():
