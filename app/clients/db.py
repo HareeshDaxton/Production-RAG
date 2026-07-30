@@ -154,6 +154,21 @@ def enqueue_candidate(query: str, reason: str, retrieved_sources: str) -> int:
         return int(cur.lastrowid)
 
 
+def withdraw_thumbs_down(query: str) -> int:
+    """Pull a thumbs-down's candidate back out of the queue when the vote is taken back.
+
+    Only touches rows still `pending` — once a candidate has been drafted, reviewed or
+    approved, its history stands. Returns how many rows were withdrawn.
+    """
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE eval_candidates SET status = 'withdrawn' "
+            "WHERE query = ? AND reason = 'thumbs_down' AND status = 'pending'",
+            (query,),
+        )
+        return int(cur.rowcount)
+
+
 def record_feedback(query: str, rating: str, comment: str | None) -> int:
     with get_db() as conn:
         cur = conn.execute(

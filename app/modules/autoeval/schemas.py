@@ -10,7 +10,7 @@ from app.modules.eval.schemas import CaseType
 
 class FeedbackRequest(BaseModel):
     query: str = Field(..., min_length=3, max_length=2000)
-    rating: Literal["up", "down"]
+    rating: Literal["up", "down", "retracted"]  # "retracted" = the user took their vote back
     comment: str | None = Field(default=None, max_length=1000)
 
 

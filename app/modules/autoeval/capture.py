@@ -40,11 +40,23 @@ def capture(query: str, response: AskResponse) -> int | None:
 
 
 def capture_feedback(query: str, rating: str, comment: str | None) -> int | None:
-    """A thumbs-down enqueues a candidate directly (independent of confidence)."""
-    from app.clients.db import record_feedback
+    """A thumbs-down enqueues a candidate directly (independent of confidence).
+
+    Ratings are toggleable in the UI, so the queue has to follow the vote: any rating
+    other than "down" (an "up", or a "retracted" un-click) withdraws the candidate a
+    previous thumbs-down created, provided review hasn't started on it. The `feedback`
+    table itself stays append-only — a retraction is a new row, never an edit — so the
+    audit trail keeps both the vote and the change of mind.
+    """
+    from app.clients.db import record_feedback, withdraw_thumbs_down
 
     record_feedback(query, rating, comment)
-    if rating == "down" and get_config().autoeval.enabled:
+    if rating != "down":
+        withdrawn = withdraw_thumbs_down(query)
+        if withdrawn:
+            logger.info("thumbs-down withdrawn", extra={"candidates": withdrawn, "rating": rating})
+        return None
+    if get_config().autoeval.enabled:
         cid = enqueue_candidate(query, "thumbs_down", "")
         logger.info("eval candidate from feedback", extra={"id": cid})
         return cid
