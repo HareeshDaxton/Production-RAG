@@ -111,6 +111,7 @@ def _final_response(query: str, result: RetrievalResult, gen: GeneratedAnswer) -
         result.chunks,
         self_confidence=gen.self_confidence,
         retrieval_confidence=result.confidence,
+        declared=gen.citations_used,
     )
     # Below the threshold → refuse to guess; return an honest IDK with what was found.
     if not report.answerable:

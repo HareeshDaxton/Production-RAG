@@ -56,3 +56,28 @@ def extract_citations(
             )
         )
     return extracted
+
+
+def citations_from_declared(
+    numbers: Sequence[int], answer: str, chunks: Sequence[RetrievedChunk]
+) -> list[ExtractedCitation]:
+    """Fall back to the model's `citations_used` when it wrote no inline markers.
+
+    Summary-style answers ("tell me what this file says") often come back as flowing
+    prose with the sources declared in the structured field but no `[n]` in the text.
+    Scoring those as uncited sent perfectly grounded answers to the IDK gate, so the
+    declared blocks are verified instead — against the whole answer, since there is no
+    single sentence to attribute.
+    """
+    claim = answer.strip()
+    return [
+        ExtractedCitation(
+            number=n,
+            claim=claim,
+            source_text=chunks[n - 1].text,
+            source=chunks[n - 1].source,
+            section=chunks[n - 1].section_path,
+        )
+        for n in sorted(set(numbers))
+        if 1 <= n <= len(chunks)
+    ]

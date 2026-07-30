@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from app.config import get_config
 from app.logging_config import get_logger
 from app.modules.quality.confidence import citation_accuracy, composite_confidence
-from app.modules.quality.extractor import extract_citations
+from app.modules.quality.extractor import citations_from_declared, extract_citations
 from app.modules.quality.verifier import CitationCheck, verify_citations
 from app.modules.retrieval.dense import RetrievedChunk
 
@@ -36,10 +36,16 @@ def assess(
     *,
     self_confidence: float,
     retrieval_confidence: float,
+    declared: Sequence[int] = (),
 ) -> QualityReport:
     cfg = get_config().quality
 
     extracted = extract_citations(answer_text, chunks)
+    if not extracted and declared:
+        # Inline markers are the primary signal, but a model that declared its sources
+        # in `citations_used` and wrote none in the prose is still citing — verify those
+        # rather than scoring the answer as unsourced and refusing it.
+        extracted = citations_from_declared(declared, answer_text, chunks)
     if cfg.verify_citations:
         checks = verify_citations(query, extracted)
         cit_acc = citation_accuracy(checks)
