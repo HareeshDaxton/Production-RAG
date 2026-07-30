@@ -226,6 +226,30 @@ def test_csv_loader_row_blocks_with_header():
     assert "name: Widget | price: 9.99" in block.text
 
 
+def test_csv_names_merged_header_columns_and_strips_the_bom():
+    """Spreadsheet exports leave blank header cells and a BOM; neither may reach the text.
+
+    Unnamed columns used to render as a bare ": value", which is noise to the embedder
+    and unreadable in a citation.
+    """
+    doc = csv_loader.load(FIXTURES / "merged_header.csv", "merged_header.csv")
+    assert doc is not None
+    text = doc.blocks[0].text
+
+    assert "﻿" not in text
+    assert text.startswith("Columns: Id, Identifier, Identifier 2, Identifier 3, Active,")
+    assert "Identifier 2: MRN | Identifier 3: http://sys" in text
+    assert " | : " not in text  # no orphan pairs from unnamed columns
+
+
+def test_csv_skips_empty_cells():
+    """A blank cell carries no information — it should not become 'col: '."""
+    doc = csv_loader.load(FIXTURES / "merged_header.csv", "merged_header.csv")
+    assert doc is not None
+    second_row = doc.blocks[0].text.splitlines()[-1]
+    assert second_row == "Id: 2 | Identifier: DEF | Active: false | name {HumanName}: Roe"
+
+
 def test_csv_rows_per_chunk_splits_blocks(monkeypatch):
     from app.config import get_config
 
