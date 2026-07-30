@@ -6,9 +6,16 @@ import { Button } from "@/components/ui/button";
 import { sendFeedback } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+const NOTES = {
+  up: "Thanks",
+  down: "Queued for review",
+  retracted: "Rating removed",
+} as const;
+
 /**
  * Copy / regenerate / rate. Thumbs post to /v1/feedback, which records the vote and
- * — on a thumbs-down — enqueues an auto-eval candidate for human review.
+ * — on a thumbs-down — enqueues an auto-eval candidate for human review. Votes are
+ * toggleable, and un-voting withdraws that candidate again.
  */
 export function MessageActions({
   answer,
@@ -22,7 +29,7 @@ export function MessageActions({
   answer: string;
   query: string;
   feedback?: "up" | "down";
-  onFeedback: (rating: "up" | "down") => void;
+  onFeedback: (rating: "up" | "down" | null) => void;
   onRegenerate: () => void;
   disabled?: boolean;
   cached?: boolean;
@@ -40,12 +47,13 @@ export function MessageActions({
     }
   }
 
+  /** Thumbs toggle: clicking the active rating clears it, the other one switches. */
   async function rate(rating: "up" | "down") {
-    if (feedback) return;
-    onFeedback(rating); // optimistic — a vote shouldn't block on the network
+    const next = feedback === rating ? null : rating;
+    onFeedback(next); // optimistic — a vote shouldn't block on the network
     try {
-      await sendFeedback(query, rating);
-      setNote(rating === "down" ? "Queued for review" : "Thanks");
+      await sendFeedback(query, next ?? "retracted");
+      setNote(NOTES[next ?? "retracted"]);
       window.setTimeout(() => setNote(null), 2400);
     } catch {
       setNote("Feedback not recorded");
@@ -75,10 +83,9 @@ export function MessageActions({
       <Button
         size="icon"
         onClick={() => rate("up")}
-        disabled={Boolean(feedback)}
-        aria-label="Good answer"
+        aria-label={feedback === "up" ? "Remove good rating" : "Good answer"}
         aria-pressed={feedback === "up"}
-        title="Good answer"
+        title={feedback === "up" ? "Click again to remove" : "Good answer"}
       >
         <ThumbsUp
           className={cn("h-3.5 w-3.5", feedback === "up" && "fill-current text-foreground")}
@@ -89,10 +96,13 @@ export function MessageActions({
       <Button
         size="icon"
         onClick={() => rate("down")}
-        disabled={Boolean(feedback)}
-        aria-label="Bad answer"
+        aria-label={feedback === "down" ? "Remove bad rating" : "Bad answer"}
         aria-pressed={feedback === "down"}
-        title="Needs work — queues an eval candidate"
+        title={
+          feedback === "down"
+            ? "Click again to remove"
+            : "Needs work — queues an eval candidate"
+        }
         className="mr-1"
       >
         <ThumbsDown
