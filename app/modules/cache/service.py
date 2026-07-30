@@ -29,10 +29,15 @@ class CacheLookup:
 
 
 def _filters_key(filters: Filters | None) -> str:
-    """Canonical (order-independent) string for the active filters."""
+    """Canonical (order-independent) string for the active filters.
+
+    List values are sorted as well as keys, so the same scope written in a different
+    order (["a","b"] vs ["b","a"]) shares one cache entry instead of two.
+    """
     if not filters:
         return ""
-    return json.dumps(filters, sort_keys=True, separators=(",", ":"))
+    canonical = {k: sorted(v) if isinstance(v, list) else v for k, v in filters.items()}
+    return json.dumps(canonical, sort_keys=True, separators=(",", ":"))
 
 
 def params_hash(top_k: int, mode: str, filters: Filters | None = None) -> str:
