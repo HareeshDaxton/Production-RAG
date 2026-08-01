@@ -31,12 +31,12 @@ def ready() -> ReadyResponse:
         checks["sqlite"] = f"error: {exc}"
 
     try:
-        from app.clients.vectorstore import get_chunks_collection
+        from app.clients.vectorstore import get_vector_store
 
-        get_chunks_collection().count()
-        checks["chroma"] = "ok"
+        get_vector_store().count()
+        checks["vectors"] = "ok"
     except Exception as exc:  # noqa: BLE001
-        checks["chroma"] = f"error: {exc}"
+        checks["vectors"] = f"error: {exc}"
 
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
     return ReadyResponse(status=status, checks=checks)

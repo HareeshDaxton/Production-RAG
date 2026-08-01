@@ -35,8 +35,9 @@ def test_ready_endpoint():
     r = client.get("/ready")
     assert r.status_code == 200
     checks = r.json()["checks"]
+    # Named by role, not engine: the backends are pluggable from Phase 9.
     assert checks.get("sqlite") == "ok"
-    assert checks.get("chroma") == "ok"
+    assert checks.get("vectors") == "ok"
 
 
 @pytest.mark.slow

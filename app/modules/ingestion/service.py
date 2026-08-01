@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.clients.db import record_ingestion
-from app.clients.vectorstore import get_chunks_collection, reset_chunks_collection
+from app.clients.vectorstore import get_vector_store, reset_vector_store
 from app.config import get_config
 from app.logging_config import get_logger
 from app.modules.ingestion.chunker import chunk_document
@@ -39,13 +39,12 @@ def delete_document(source: str) -> int:
     The BM25 index is rebuilt afterwards — it is a snapshot of the collection, so
     skipping the rebuild would leave keyword search matching deleted documents.
     """
-    collection = get_chunks_collection()
-    existing = collection.get(where={"source": source}, include=[])
-    ids = existing.get("ids") or []
+    store = get_vector_store()
+    ids = store.ids_where({"source": source})
     if not ids:
         return 0
 
-    collection.delete(ids=ids)
+    store.delete_ids(ids)
     rebuild_bm25_index()
     # Deleting changes what is retrievable, so cached answers built from this
     # document must not keep being served.
@@ -60,13 +59,8 @@ def list_indexed_documents() -> list[IndexedDocument]:
     The collection is the source of truth for what is searchable — `ingestion_audit`
     only records the directory an ingest ran against, not individual files.
     """
-    collection = get_chunks_collection()
-    if collection.count() == 0:
-        return []
-
-    data = collection.get(include=["metadatas"])
     grouped: dict[str, IndexedDocument] = {}
-    for meta in data.get("metadatas") or []:
+    for meta in get_vector_store().fetch_all().metadatas:
         meta = meta or {}
         source = str(meta.get("source") or "")
         if not source:
@@ -100,7 +94,7 @@ def ingest_directory(source_dir: str | Path | None = None, reset: bool = False) 
     src = Path(source_dir) if source_dir else cfg.ingestion.corpus.dir
 
     if reset:
-        reset_chunks_collection()
+        reset_vector_store()
 
     docs = load_documents(src)
     chunks = [c for doc in docs for c in chunk_document(doc, cfg.ingestion.chunking)]

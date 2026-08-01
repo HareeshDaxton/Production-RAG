@@ -13,7 +13,7 @@ import pickle
 import re
 from dataclasses import dataclass
 
-from app.clients.vectorstore import get_chunks_collection
+from app.clients.vectorstore import get_vector_store
 from app.config import get_config
 from app.logging_config import get_logger
 from app.modules.retrieval.dense import RetrievedChunk, chunk_from_meta
@@ -73,10 +73,8 @@ def rebuild_bm25_index() -> int:
     global _cached
     from rank_bm25 import BM25Okapi
 
-    data = get_chunks_collection().get(include=["documents", "metadatas"])
-    ids = data.get("ids") or []
-    texts = data.get("documents") or []
-    metadatas = data.get("metadatas") or []
+    stored = get_vector_store().fetch_all()
+    ids, texts, metadatas = stored.ids, stored.documents, stored.metadatas
 
     corpus = [_tokenize(t) for t in texts]
     # BM25Okapi requires a non-empty corpus; guard the empty-collection case.

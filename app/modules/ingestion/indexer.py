@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 from app.clients.embeddings import get_embedder
-from app.clients.vectorstore import get_chunks_collection
+from app.clients.vectorstore import assert_dimension, get_vector_store
+from app.config import get_config
 from app.logging_config import get_logger
 from app.modules.ingestion.chunker import Chunk
 
 logger = get_logger(__name__)
+
+# Namespace for fields lifted out of structured records (see `_chunk_metadata`).
+FIELD_PREFIX = "f_"
 
 
 def _chunk_metadata(c: Chunk) -> dict:
@@ -33,27 +37,36 @@ def _chunk_metadata(c: Chunk) -> dict:
         md["locator"] = c.locator
     if c.created_at:
         md["created_at"] = c.created_at
+
+    # Record fields are namespaced so a field called "source" or "title" cannot
+    # overwrite the chunk's own provenance. `record_id` is promoted unprefixed
+    # because retrieval looks it up by name for exact identifier matching.
+    for key, value in (c.fields or {}).items():
+        if key == "record_id":
+            md["record_id"] = str(value)
+        elif isinstance(value, (str, int, float, bool)):
+            md[f"{FIELD_PREFIX}{key}"] = value
     return md
 
 
 def index_chunks(chunks: list[Chunk]) -> int:
     if not chunks:
         return 0
-    collection = get_chunks_collection()
+    store = get_vector_store()
+    # Cheap up front; the alternative is a raw driver error after paying for the
+    # embeddings of every chunk in the document.
+    assert_dimension(store, get_config().models.embedding.dimensions)
 
     # Idempotent re-ingest: drop any prior chunks for these documents first, so
     # editing/re-running a doc replaces its chunks (and prunes stale ones) rather
     # than piling up duplicates. Deterministic chunk ids alone would overwrite
     # position-for-position but leave orphans when a doc shrinks; this handles both.
     doc_ids = sorted({c.doc_id for c in chunks})
-    try:
-        collection.delete(where={"doc_id": {"$in": doc_ids}})
-    except Exception:  # noqa: BLE001 - empty/absent collection is fine
-        logger.debug("no prior chunks to delete", extra={"docs": len(doc_ids)})
+    store.delete_where({"doc_id": {"$in": doc_ids}})
 
     texts = [c.text for c in chunks]
     embeddings = get_embedder().embed_texts(texts)  # document-side (no query prefix)
-    collection.add(
+    store.add(
         ids=[c.chunk_id for c in chunks],
         embeddings=embeddings,
         documents=texts,

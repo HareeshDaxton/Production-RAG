@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.clients.embeddings import get_embedder
-from app.clients.vectorstore import get_chunks_collection
+from app.clients.vectorstore import get_vector_store
 from app.logging_config import get_logger
 from app.modules.retrieval.filters import Filters, build_where
 
@@ -46,24 +46,16 @@ def chunk_from_meta(chunk_id: str, text: str, meta: dict | None, score: float) -
 def dense_retrieve(
     query: str, top_k: int, filters: Filters | None = None
 ) -> list[RetrievedChunk]:
-    collection = get_chunks_collection()
-    if collection.count() == 0:
-        return []
-
     qvec = get_embedder().embed_query(query)  # query-side prefix applied here
-    res = collection.query(
-        query_embeddings=[qvec],
-        n_results=min(top_k, collection.count()),
-        where=build_where(filters),  # metadata equality filter (M6); None = no filter
+    found = get_vector_store().query(
+        qvec,
+        top_k,
+        build_where(filters),  # metadata filter (M6); None = no filter
     )
-    ids = res["ids"][0]
-    docs = res["documents"][0]
-    metas = res["metadatas"][0]
-    dists = res["distances"][0]
-
     hits = [
-        chunk_from_meta(cid, text, meta, 1.0 - float(dist))  # chroma cosine distance -> similarity
-        for cid, text, meta, dist in zip(ids, docs, metas, dists, strict=False)
+        # Both backends report cosine distance, so this conversion is backend-agnostic.
+        chunk_from_meta(h.chunk_id, h.document, h.metadata, 1.0 - h.distance)
+        for h in found
     ]
     logger.info("dense retrieval", extra={"query_len": len(query), "hits": len(hits)})
     return hits
