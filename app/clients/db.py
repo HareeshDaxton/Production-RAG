@@ -1,99 +1,31 @@
-"""SQLite audit/metadata store for early phases.
+"""Operational store: audit, eval, auto-eval and feedback rows.
 
-Deliberately minimal now; the richer schema (query_records, eval_cases, ...) lands
-with the phases that need it, and migrates to Postgres+pgvector in Phase 8.
+The queries live here; `relational.py` decides whether they run on SQLite (the
+zero-infrastructure default) or Postgres (Phase 9). Placeholders are written `?`
+and translated per dialect, so this module is engine-agnostic.
 """
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from app.config import get_config
+from app.clients.relational import Connection, get_connection, provider
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS system_events (
-    event_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_type TEXT NOT NULL,
-    details    TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS ingestion_audit (
-    audit_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    source     TEXT,
-    documents  INTEGER,
-    chunks     INTEGER,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS eval_runs (
-    run_id       TEXT PRIMARY KEY,
-    strategy     TEXT,
-    n_cases      INTEGER,
-    metrics_json TEXT,
-    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS eval_case_results (
-    run_id       TEXT,
-    case_id      TEXT,
-    case_type    TEXT,
-    score        REAL,
-    metrics_json TEXT
-);
-
-CREATE TABLE IF NOT EXISTS eval_candidates (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    query             TEXT NOT NULL,
-    reason            TEXT,
-    retrieved_sources TEXT,
-    proposed_answer   TEXT,
-    proposed_type     TEXT,
-    proposed_sources  TEXT,
-    agreement         INTEGER,
-    status            TEXT DEFAULT 'pending',
-    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS feedback (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    query      TEXT NOT NULL,
-    rating     TEXT,
-    comment    TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
-
-def _connect() -> sqlite3.Connection:
-    cfg = get_config()
-    cfg.paths.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(cfg.paths.sqlite_path))
-    conn.row_factory = sqlite3.Row
-    # Ensure schema on every connection (idempotent) so any entry point —
-    # API, tests, or scripts — always has the tables, not just API startup.
-    conn.executescript(_SCHEMA)
-    return conn
-
 
 @contextmanager
-def get_db() -> Iterator[sqlite3.Connection]:
-    conn = _connect()
-    try:
+def get_db() -> Iterator[Connection]:
+    with get_connection() as conn:
         yield conn
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def init_db() -> None:
-    with get_db() as conn:
-        conn.executescript(_SCHEMA)
-    logger.info("sqlite initialized")
+    """Ensure the schema exists (connecting already does; this makes it explicit)."""
+    with get_db():
+        pass
+    logger.info("relational store initialized", extra={"provider": provider()})
 
 
 def record_event(event_type: str, details: str | None = None) -> None:
@@ -121,9 +53,13 @@ def record_eval_run(
 ) -> None:
     """Persist an eval run + its per-case rows (case_id, case_type, score, metrics_json)."""
     with get_db() as conn:
+        # `ON CONFLICT ... excluded` is the upsert both dialects understand
+        # (SQLite's `INSERT OR REPLACE` is not valid Postgres).
         conn.execute(
-            "INSERT OR REPLACE INTO eval_runs (run_id, strategy, n_cases, metrics_json) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO eval_runs (run_id, strategy, n_cases, metrics_json) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (run_id) DO UPDATE SET strategy = excluded.strategy, "
+            "n_cases = excluded.n_cases, metrics_json = excluded.metrics_json",
             (run_id, strategy, n_cases, metrics_json),
         )
         conn.executemany(
@@ -147,11 +83,10 @@ def get_corpus_version() -> int:
 
 def enqueue_candidate(query: str, reason: str, retrieved_sources: str) -> int:
     with get_db() as conn:
-        cur = conn.execute(
+        return conn.insert_returning_id(
             "INSERT INTO eval_candidates (query, reason, retrieved_sources) VALUES (?, ?, ?)",
             (query, reason, retrieved_sources),
         )
-        return int(cur.lastrowid)
 
 
 def withdraw_thumbs_down(query: str) -> int:
@@ -171,11 +106,10 @@ def withdraw_thumbs_down(query: str) -> int:
 
 def record_feedback(query: str, rating: str, comment: str | None) -> int:
     with get_db() as conn:
-        cur = conn.execute(
+        return conn.insert_returning_id(
             "INSERT INTO feedback (query, rating, comment) VALUES (?, ?, ?)",
             (query, rating, comment),
         )
-        return int(cur.lastrowid)
 
 
 def list_candidates(status: str | None = None, limit: int = 100) -> list[dict]:
