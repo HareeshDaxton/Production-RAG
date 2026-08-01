@@ -21,15 +21,22 @@ paths:
   bm25_dir: data/bm25_index
 
 models:
-  # Local, free, CPU. Query-side instruction prefix improves bge retrieval.
+  # OpenAI API — no CPU cost, no local weights. Switch provider back to `local` with
+  # the bge settings below to run offline (changing either way needs a re-ingest:
+  # the vector width changes, so old chunks and cache entries are unusable).
   embedding:
-    provider: local
-    name:  BAAI/bge-base-en-v1.5  #Better accuracy , BAAI/bge-small-en-v1.5->Good for development
-    dimensions: 768   # bge-base=768, bge-small=384, bge-large=1024 (must match the model)
-    device: cpu
-    query_prefix: "Represent this sentence for searching relevant passages: "
-    batch_size: 64
+    provider: openai            # openai | local
+    name: text-embedding-3-small
+    dimensions: 1536            # v3 native width; may be shortened (e.g. 512) — must match the store
+    device: cpu                 # local provider only
+    query_prefix: ""            # bge wants an instruction prefix; OpenAI does not
+    batch_size: 64              # inputs per API request
     normalize: true
+    # Local alternative:
+    #   provider: local
+    #   name: BAAI/bge-base-en-v1.5   # bge-base=768, bge-small=384, bge-large=1024
+    #   dimensions: 768
+    #   query_prefix: "Represent this sentence for searching relevant passages: "
 
   # Local cross-encoder; used from Phase 2 (second-pass precision).
   reranker:
@@ -61,10 +68,27 @@ models:
     max_tokens: 48
     max_chars: 60
 
+# Phase 9: where vectors and operational rows live. Both are pluggable — chroma +
+# sqlite needs no infrastructure (tests, laptop), pgvector + postgres is the
+# production pair (docker compose up -d postgres). Switching the vector store
+# requires a re-ingest: the vectors themselves are not copied between engines
+# except by scripts/migrate_to_postgres.py.
+stores:
+  vector: chroma              # chroma | pgvector
+  relational: sqlite          # sqlite | postgres
+  postgres:
+    dsn: postgresql://rag:rag@localhost:5433/rag   # override with POSTGRES_DSN in .env
+    chunks_table: chunks
+    hnsw_m: 16                # graph degree; higher = better recall, slower build
+    hnsw_ef_construction: 64  # build-time candidate list
+    min_pool_size: 1
+    max_pool_size: 5
+
 retrieval:
   default_top_k: 5              # final chunks handed to generation
   mode: hybrid                  # hybrid (dense+BM25+RRF+rerank) | dense (Phase 1 path). Per-request override via AskRequest.mode
   structured_confidence_from_dense: true  # CSV/JSON/XML score ~0 on the cross-encoder → use cosine
+  identifier_match_confidence: 0.95       # exact record-id match beats any similarity score
   dense_candidates: 20          # dense pool size before fusion
   sparse_candidates: 20         # BM25 pool size before fusion
   rrf_k: 60                     # Reciprocal Rank Fusion damping constant
@@ -86,6 +110,13 @@ ingestion:
       dpi: 200                    # render resolution for scanned PDF pages before OCR
     csv:                          # csv/json/xml use the 'structured' chunker (one record per chunk)
       rows_per_chunk: 20          # data rows grouped into one block (header prepended for context)
+    json:                         # structure-aware: descend until each record fits
+      max_record_tokens: 400      # a node bigger than this is split by key/element
+      max_depth: 6                # guard against pathological nesting
+      extract_fields: true        # lift a record's scalar fields into chunk metadata
+      max_fields: 16              # cap per record (metadata must stay flat scalars)
+      max_field_chars: 120        # longer values are not useful to filter on
+      id_keys: [id, _id, uid, uuid, code, mrn, number, key]   # first match -> record_id
   chunking:
     strategy: recursive         # recursive (by headers) | fixed (token windows) | semantic (embedding-based)
     max_chunk_tokens: 512
