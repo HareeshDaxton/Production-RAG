@@ -1,0 +1,22 @@
+{
+  "export": "clinic-2026",
+  "record_count": 2,
+  "patients": [
+    {
+      "patient_id": "PAT-0001",
+      "name": { "given": "Ada", "family": "Lovelace" },
+      "gender": "female",
+      "vitals": { "hba1c": 6.1, "bmi": 22.4 },
+      "medications": [{ "name": "Metformin", "dose_mg": 500 }],
+      "notes": "Routine review; symptoms stable and no change to therapy was required."
+    },
+    {
+      "patient_id": "PAT-0002",
+      "name": { "given": "Grace", "family": "Hopper" },
+      "gender": "female",
+      "vitals": { "hba1c": 7.4, "bmi": 26.9 },
+      "medications": [{ "name": "Lisinopril", "dose_mg": 10 }],
+      "notes": "Blood pressure elevated at review; dose increased and follow-up booked."
+    }
+  ]
+}

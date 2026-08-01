@@ -259,14 +259,56 @@ def test_csv_rows_per_chunk_splits_blocks(monkeypatch):
     assert [b.locator for b in doc.blocks] == ["rows 1-2", "rows 3-3"]
 
 
-def test_json_loader_top_level_elements():
+def test_json_small_document_is_kept_whole():
+    """A document that already fits is one record — splitting it only fragments it."""
     doc = json_loader.load(FIXTURES / "sample.json", "sample.json")
     assert doc is not None
     assert doc.file_type == "json"
-    locators = {b.locator for b in doc.blocks}
-    # top-level object → one block per key
-    assert {"$.service", "$.endpoints", "$.auth"} <= locators
+    assert [b.locator for b in doc.blocks] == ["$"]
     assert all(b.content_type == "object" for b in doc.blocks)
+
+
+def test_json_descends_into_a_nested_record_array(monkeypatch):
+    """The 10k-line case: a nested array must explode, one block per record.
+
+    Splitting only at the top level left `$.patients` as a single huge block that
+    token-slicing then cut mid-record, so no chunk held a whole patient and every
+    chunk carried the same locator.
+    """
+    from app.config import get_config
+
+    monkeypatch.setattr(get_config().ingestion.formats.json_format, "max_record_tokens", 150)
+    doc = json_loader.load(FIXTURES / "records.json", "records.json")
+    assert doc is not None
+
+    locators = [b.locator for b in doc.blocks]
+    assert "$.patients[0]" in locators and "$.patients[1]" in locators
+    assert len(set(locators)) == len(locators)  # every record is individually addressable
+
+
+def test_json_lifts_record_fields_into_metadata(monkeypatch):
+    from app.config import get_config
+
+    monkeypatch.setattr(get_config().ingestion.formats.json_format, "max_record_tokens", 150)
+    doc = json_loader.load(FIXTURES / "records.json", "records.json")
+    assert doc is not None
+    record = next(b for b in doc.blocks if b.locator == "$.patients[1]")
+
+    assert record.fields["patient_id"] == "PAT-0002"
+    assert record.fields["record_id"] == "PAT-0002"  # id-like key is promoted
+    assert record.fields["vitals.hba1c"] == 7.4  # nested scalars are flattened
+    assert "medications" not in record.fields  # lists are not fields
+
+
+def test_json_scalar_list_stays_with_its_key(monkeypatch):
+    """["read","write"] is a value, not a set of records — it must not explode."""
+    from app.config import get_config
+
+    monkeypatch.setattr(get_config().ingestion.formats.json_format, "max_record_tokens", 10)
+    doc = json_loader.load(FIXTURES / "sample.json", "sample.json")
+    assert doc is not None
+    assert "$.auth.scopes" in [b.locator for b in doc.blocks]
+    assert not any((b.locator or "").startswith("$.auth.scopes[") for b in doc.blocks)
 
 
 def test_xml_loader_element_blocks():
