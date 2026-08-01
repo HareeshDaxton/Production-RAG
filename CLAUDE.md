@@ -22,7 +22,7 @@ originals: dashboard → **Phase 8**, service split → **Phase 9**.
 - Phase 6 — Auto-eval loop — ✅
 - Phase 7 — Multi-format ingestion (9 types) + metadata + filtered retrieval — ✅ (was M1–M6)
 - Phase 8 — API polish + **Next.js chat frontend** — 🔄 in progress (Streamlit dropped, user call)
-- Phase 9 — Service split + Postgres/pgvector — ⏳ deferred
+- Phase 9 — Postgres/pgvector (9A) ✅ · service split (9B) ⏳
 
 ## Environment
 - OS: Windows 11, PowerShell (primary shell). Project root: `e:\Production_RAG`.
@@ -38,7 +38,10 @@ originals: dashboard → **Phase 8**, service split → **Phase 9**.
 - **Modular monolith now → hard split into services in Phase 9.** Keep module boundaries clean
   (`app/{routers,modules,clients,models,utils}`) so the split is mechanical, not a rewrite.
 - **Do not add infra before its phase:** Redis (cache) = Phase 5; Postgres+pgvector = Phase 9.
-  Early datastores are ChromaDB (vectors) + SQLite (metadata/audit/eval) only.
+- **Stores are pluggable (Phase 9).** Nothing outside `app/clients/` may touch a storage
+  engine's own API. Vectors go through the `VectorStore` interface (`chroma` | `pgvector`),
+  operational rows through `db.py` (`sqlite` | `postgres`). `chroma`+`sqlite` stays the default
+  so tests and a laptop run need no Docker.
 - **Models:** local embeddings (`bge-base-en-v1.5`, **768-dim** — keep `models.embedding.dimensions`
   in sync with the model) + local cross-encoder rerank +
   configurable judge (Ollama or cheap API). API used only for final grounded generation.
@@ -289,10 +292,93 @@ originals: dashboard → **Phase 8**, service split → **Phase 9**.
     render as cards above the question (`ChatMessage.attachments`); composer chips are staged
     uploads only, and the composer footer names the scope.
   - Remaining Phase 8 ideas (not built): cache panel, eval + review-queue views, retrieval controls.
-- **Phase 9 (deferred)** — hard split into services + Postgres/pgvector migration (modular monolith
-  → real services; vectors/metadata move off ChromaDB+SQLite).
+- **PHASE 9A — Postgres/pgvector — ✅ COMPLETE.** Storage engines are now pluggable, so the
+  project runs with no infrastructure (tests, laptop) *or* on Postgres (production) without a
+  code change. **9B (service split) remains.**
+  - **Vectors:** new `app/clients/vector/` — `base.py` (`VectorStore` Protocol, `VectorHit`,
+    `StoredChunks`, `assert_dimension`, `EmbeddingDimensionMismatch`), `chroma.py`
+    (`ChromaVectorStore`, the old behaviour), `pgvector.py` (`PgVectorStore`).
+    `clients/vectorstore.py` is a facade: `get_vector_store()` (lru-cached, dispatches on
+    `stores.vector`) + `reset_vector_store()`. **Chroma's API no longer leaks**: `dense.py`,
+    `sparse.py`, `indexer.py`, `ingestion/service.py` and `/ready` all talk to the interface.
+  - **pgvector schema:** one table `chunks(id text pk, embedding vector(N), document text,
+    metadata jsonb)` + HNSW (`vector_cosine_ops`, `m`/`ef_construction` from config) + GIN on
+    metadata. KNN uses `<=>` (cosine), so distances match Chroma's and callers convert
+    identically. Phase 7-M6 filters translate to SQL: equality → `metadata->>k = %s`, `$in` →
+    `= ANY(%s)`, `$and` → `AND`. **Unsupported operators raise** (`UnsupportedFilter`) rather
+    than being dropped — a silently-ignored filter would widen a scoped search. Keys and values
+    are always bound, never interpolated.
+  - **Relational:** new `app/clients/relational.py` owns dialect differences (placeholders `?`→
+    `%s`, `AUTOINCREMENT`→`BIGSERIAL`, `lastrowid`→`RETURNING`) behind a small `Connection`
+    wrapper; `db.py` keeps every public function unchanged. `INSERT OR REPLACE` became
+    `ON CONFLICT … excluded`, which both dialects accept.
+  - **Infra/config:** `docker-compose.yml` adds `pgvector/pgvector:pg17` on host **5433**;
+    `stores.{vector,relational,postgres.*}` in `system.yaml`; DSN overridable via `POSTGRES_DSN`
+    in `.env` (the yaml holds local dev credentials only).
+  - **Migration:** `scripts/migrate_to_postgres.py` copies Chroma vectors **without
+    re-embedding** (free, answers stay identical) and the SQLite rows preserving ids/timestamps,
+    then advances the Postgres sequences past the copied ids. `--dry-run`/`--rows-only`/
+    `--vectors-only`.
+  - **Eval gate (the phase's proof).** Re-fetched the 154-doc FastAPI corpus and re-ingested it
+    under `text-embedding-3-small` (155 docs → **2108 chunks in 48s**, vs minutes on the CPU
+    model), then ran `scripts/run_eval.py` on the refactored code: **overall 0.927**
+    (retrieval_recall 0.925, correctness 0.970, faithfulness 0.990, completeness 0.940,
+    citation_accuracy 0.713, **idk_accuracy 1.000**; by type: simple 0.959, multi_hop 0.872,
+    ambiguous 0.780, no_answer 1.000). Against the Phase 4 baseline (0.918) every metric is
+    equal or better — but that comparison spans **two** changes (store refactor *and* the
+    embedding-model switch), so read it as "no regression", not as an attribution. The runner
+    reported "no previous run" because the eval tables were empty after the OS reinstall; this
+    run is now the stored baseline for the next phase.
+  - **NOTE — psycopg is not installed.** `uv` is blocked by this machine's Application Control
+    policy, so the Postgres paths are written but unrun: install with
+    `uv add "psycopg[binary,pool]"` before setting either provider to postgres/pgvector. The
+    SQL itself was verified against the live pgvector container via `psql` (DDL, HNSW+GIN
+    indexes, `<=>` KNN ordering, all three filter shapes, `vector_dims`, upsert).
 
 ## Update log
+- 2026-08-01: **Record-level JSON + identifier-exact retrieval (production fix for large JSON).**
+  Reported on a 10k-line patient export: the first question returned "no information", and three
+  questions naming different `patient_id`s all returned the *same* answer. Three causes, all fixed
+  and each measured first:
+  (1) **JSON split only at the top level** — `{"patients":[…]}` became one 54KB block that token-
+  slicing cut mid-record; 120 patients → 39 chunks all carrying the locator `$.patients`, so no
+  chunk held a whole record. `loaders/json.py` is now **structure-aware**: a list of objects always
+  explodes (`$.patients[41]`), an object is kept whole while it fits `formats.json.max_record_tokens`
+  (400) and is split per key otherwise, and a list of scalars stays with its key. Same file now →
+  **120 blocks, 120 distinct locators, one record per chunk**.
+  (2) **No exact lookup for identifiers** — two ids differing by one digit embed at **0.998** cosine,
+  so neither KNN nor the reranker can separate them. Records now carry their scalar fields as chunk
+  metadata (`Block.fields` → `Chunk.fields` → `f_*` keys, plus `record_id` from `formats.json.id_keys`),
+  and new `retrieval/identifiers.py` scopes a query naming an id to those records
+  (`{"record_id": …}`). Applied **only on a confirmed hit**, so "COVID-19" (id-shaped, not a record)
+  still answers normally; any store error degrades to the caller's filters.
+  (3) **The semantic cache served one id's answer for another** — 0.998 similarity is far above the
+  0.90 threshold. Because the identifier filter is resolved *before* the cache key is built, the
+  params hash now differs per id, so the collision is structurally impossible.
+  Also: `retrieval.identifier_match_confidence` (0.95) — an exact id match is stronger evidence than
+  any similarity, and without it the gate refused answers built from provably correct records
+  (measured: PAT-20260042 scored 0.4195 → IDK). Live on 120 records: three ids → three distinct
+  correct answers, confidence 0.96/0.96/0.98, all `cached=false`, verified field-by-field against the
+  source JSON. Config `ingestion.formats.json.*`; `FormatsConfig.json_format` is aliased to the yaml
+  key `json` (pydantic's `BaseModel.json` shadows it). **JSON files ingested before this must be
+  re-uploaded** to get record-level chunks. 21 new fast tests → **93 fast green**, ruff clean.
+- 2026-07-31: **PHASE 9A COMPLETE — Postgres/pgvector behind pluggable stores.** User chose
+  "9A first", "pluggable via config", "run the eval gate". Storage engines are now selected by
+  `stores.{vector,relational}`: new `app/clients/vector/{base,chroma,pgvector}.py` (a
+  `VectorStore` Protocol; Chroma's API no longer leaks into `dense.py`/`sparse.py`/`indexer.py`/
+  `ingestion/service.py`/`/ready`) and `app/clients/relational.py` (dialect differences only:
+  `?`→`%s`, `AUTOINCREMENT`→`BIGSERIAL`, `lastrowid`→`RETURNING`), with `db.py`'s public API
+  untouched. pgvector = one `chunks` table (`vector(N)` + `jsonb`) with HNSW + GIN; M6 filters
+  become `metadata->>k = %s` / `= ANY(%s)` / `AND`, and an **unsupported operator raises**
+  instead of being dropped. `docker-compose.yml` adds `pgvector/pgvector:pg17` on host 5433;
+  `scripts/migrate_to_postgres.py` copies vectors **without re-embedding**. **Verified:** the
+  SQL was exercised against the live container via `psql` (DDL, HNSW/GIN, `<=>` KNN ordering,
+  all three filter shapes, `vector_dims`, upsert) and both Postgres paths degrade with an
+  actionable message when the driver is absent; **82 fast tests green (+10), ruff clean**; eval
+  **0.927 overall, no regression** (see the Phase 9A block). **psycopg is NOT installed** — `uv`
+  is blocked by this machine's Application Control policy, so the Postgres code is written but
+  unrun: `uv add "psycopg[binary,pool]"` before flipping either provider. Defaults stay
+  chroma+sqlite. **9B (service split) is the only work left in the project.**
 - 2026-07-30: **Attachment-scoped retrieval + three defects that made structured files
   unanswerable.** Reported as "I uploaded a CSV and it says no information". Root causes, all fixed:
   (1) **retrieval wasn't scoped** to the uploaded file, so a vague question about a CSV lost to the
