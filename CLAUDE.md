@@ -5,10 +5,41 @@
 > Keep it concise and current; it loads into context every session.
 
 ## Project
-Portfolio-grade **Production RAG** system fusing BASWE Projects 6 (Hybrid Search) + 7 (Semantic
-Cache) + 13 (Auto-Eval). Answers questions over the **FastAPI** docs + GitHub issues corpus.
+**Medical Research Assistant** — a portfolio-grade Production RAG system for the **medical
+domain**, fusing BASWE Projects 6 (Hybrid Search) + 7 (Semantic Cache) + 13 (Auto-Eval).
 Full plan (source of truth): `C:\Users\Hareesh\.claude\plans\hey-now-act-as-deep-creek.md`.
 Remote: https://github.com/HareeshDaxton/Production-RAG (branch `main`).
+
+**Users:** doctors, medical researchers, medical students.
+
+**Problem.** Clinicians and researchers spend hours searching thousands of pages of literature for
+evidence-based answers. Keyword search misses relevant studies; generic AI assistants answer
+without citations or verification, which makes them unusable in healthcare — a confident,
+unsourced, or subtly wrong answer is a patient-safety issue, not a UX annoyance.
+
+**Solution.** Retrieve from trusted medical documents only, **verify every citation before
+answering**, and return a grounded answer with source references and a confidence score — refusing
+to answer when the evidence does not support one.
+
+**Knowledge base (what users ingest):** research papers (PDF) · clinical guidelines (WHO, NICE,
+CDC) · treatment protocols · medical textbooks · hospital SOPs · drug reference documents.
+
+**What the domain demands of the architecture** (why the phases exist, not decoration):
+- **Citations are mandatory and verified** — Phase 3's judge checks each `[n]` against its source
+  and labels it `supported|partial|unsupported`. An unverified answer is worse than none here.
+- **Refusal is a feature** — the IDK gate (`quality.idk_threshold`) returns "I don't know" plus the
+  closest sources rather than guessing. `idk_accuracy` is a first-class eval metric (currently 1.000).
+- **Provenance to the page/section** — Phase 7's block IR carries `page`/`section`/`locator` into
+  every `Citation`, so a clinician can open the exact page of the guideline.
+- **Record-level facts** — patient/drug records are answered by exact identifier match, not by
+  embedding similarity (see the 2026-08-01 log entry).
+- **No outside knowledge** — generation is instructed to use only the retrieved context.
+
+**Domain note (open):** the corpus and prompts still carry the original FastAPI-docs framing —
+`prompt.SYSTEM_PROMPT` says "technical documentation assistant for FastAPI", `eval/golden_set.jsonl`
+is 20 FastAPI questions, and `scripts/fetch_corpus.py` fetches FastAPI docs. Those are the
+**generic-RAG leftovers to retire** when the project is presented as a medical assistant; the
+retrieval/quality machinery itself is domain-neutral and needs no change.
 
 **Canonical phase map (0–9).** The multi-format ingestion work (built after Phase 6, formerly the
 "Ingestion-v2 / M1–M6 track") is now the official **Phase 7**, which renumbers the two remaining
@@ -22,7 +53,7 @@ originals: dashboard → **Phase 8**, service split → **Phase 9**.
 - Phase 6 — Auto-eval loop — ✅
 - Phase 7 — Multi-format ingestion (9 types) + metadata + filtered retrieval — ✅ (was M1–M6)
 - Phase 8 — API polish + **Next.js chat frontend** — 🔄 in progress (Streamlit dropped, user call)
-- Phase 9 — Postgres/pgvector (9A) ✅ · service split (9B) ⏳
+- Phase 9 — Postgres/pgvector (9A) ✅ · service split + Docker (9B) ✅ — **project complete**
 
 ## Environment
 - OS: Windows 11, PowerShell (primary shell). Project root: `e:\Production_RAG`.
@@ -336,6 +367,56 @@ originals: dashboard → **Phase 8**, service split → **Phase 9**.
     indexes, `<=>` KNN ordering, all three filter shapes, `vector_dims`, upsert).
 
 ## Update log
+- 2026-08-01: **PHASE 9B COMPLETE — service split + full dockerization. The project is done.**
+  One codebase, three entrypoints, selected by `RAG_SERVICE_ROLE` (api|ingestion|retrieval|
+  monolith) plus `services.mode` (**monolith default** | distributed). `app/services/role.py`
+  `runs_locally(component)` is the whole switch — and it is what stops the retrieval service
+  calling itself over HTTP forever. New `app/services/{retrieval,ingestion}_service.py` expose
+  `/internal/*`; new `app/clients/{retrieval,ingestion}_client.py` mirror the in-process function
+  signatures exactly, so `pipeline.py` and `routers/ingest.py` contain no distribution logic
+  (the router picks module-or-client via `_ingestion()`). `models/internal.py` holds the wire
+  contracts, kept separate from the public schemas so they can change freely.
+  **BM25 ownership:** the index belongs to whoever queries it, so ingestion calls
+  `POST /internal/bm25/rebuild` on retrieval instead of writing the file across a container
+  boundary; a failed rebuild degrades ranking, it does not fail the ingest.
+  **Config:** `_apply_env_overrides` gives every yaml key an env override
+  (`RAG_STORES__VECTOR=pgvector`), which is what lets one config file serve every container.
+  **Docker:** three Dockerfiles with **split dependency sets** — `docker/requirements.{core,api,
+  ingestion,retrieval}.txt` — so the api image carries no torch and no document parsers; torch is
+  installed CPU-only from the pytorch index; model weights cache to a volume, not an image layer;
+  all images run non-root with healthchecks. `frontend/Dockerfile` is a 3-stage standalone Next.js
+  build (`output: "standalone"`). `docker-compose.yml` gains profiles: `infra` (postgres+redis
+  only) and `full` (everything).
+  **Verified live**, three processes on 8010/8011/8012: a question answered across the seams
+  (conf 0.978, citation DIABETES.pdf p.4, verdict supported) with `POST /internal/retrieve 200`
+  in the retrieval log; upload + delete proxied to ingestion; and `POST /internal/bm25/rebuild
+  200` proving the cross-service callback. `docker compose config` validates. **103 fast tests
+  green (+10), ruff clean.**
+  **Images built and the whole stack run** (verify overlay mapped api/frontend to 8100/3100 so the
+  user's dev servers kept 8000/3000): all six containers up, four healthy; a document ingested
+  api→ingestion and a question answered api→retrieval (`POST /internal/retrieve 200` from the api
+  container's IP), conf 0.9999, verdict supported; the UI served from its container; and the
+  vectors landed in **pgvector** (`SELECT vector_dims → 1536`), which finally exercises the
+  Phase 9A psycopg path that could not be run locally because uv is blocked.
+  **Sizes: api 802MB · frontend 314MB · retrieval 2.36GB · ingestion 2.9GB** — the split removes
+  ~1.6GB from the container that serves every request.
+  **Four defects only the build/run could surface:** (1) profiles on postgres/redis made a bare
+  `docker compose up -d` start nothing; (2) easyocr pulls torch, so ingestion needed the CPU index
+  too or it would fetch the ~2GB CUDA wheel; (3) the frontend Dockerfile copied a `public/`
+  directory this app does not have; (4) a named volume seeds `/srv/data` **root-owned** unless the
+  directory exists in the image first, so the non-root process could not write. Also: `routers/
+  ingest.py` imported the loader registry at module level, which drags every parser into the api
+  image — the suffix check now happens only when ingestion is local, and the remote service's 400
+  is passed through via `IngestionServiceError.status_code`.
+- 2026-08-01: **Domain fixed: Medical Research Assistant.** The project is no longer described as a
+  generic RAG over FastAPI docs — it targets doctors, researchers and medical students, over
+  research papers, clinical guidelines (WHO/NICE/CDC), treatment protocols, textbooks, hospital SOPs
+  and drug references. Rewrote the Project section with the users, problem, solution and knowledge
+  base, and tied each existing capability to the reason the domain demands it (verified citations,
+  refusal-as-a-feature, page-level provenance, exact record lookup, no outside knowledge).
+  **Flagged, not yet changed:** `prompt.SYSTEM_PROMPT` still says "technical documentation assistant
+  for FastAPI", `eval/golden_set.jsonl` is 20 FastAPI questions and `scripts/fetch_corpus.py` fetches
+  FastAPI docs — the generic-RAG leftovers to retire. Docs-only change; no code touched.
 - 2026-08-01: **Record-level JSON + identifier-exact retrieval (production fix for large JSON).**
   Reported on a 10k-line patient export: the first question returned "no information", and three
   questions naming different `patient_id`s all returned the *same* answer. Three causes, all fixed

@@ -1,0 +1,711 @@
+================================================================================
+ MEDICAL RESEARCH ASSISTANT — PRODUCTION RAG
+ Complete project reference
+================================================================================
+
+ Repository : https://github.com/HareeshDaxton/Production-RAG  (branch: main)
+ Status     : COMPLETE - Phases 0 through 9B all shipped.
+ Last update: 2026-08-01
+
+ This file is the single document to read if you have never seen this repo. It
+ explains what the system does, why each part exists, how it is built, what was
+ measured, and what is deliberately not done yet. CLAUDE.md is the working
+ companion to this file: shorter, and updated on every change.
+
+
+================================================================================
+ 1. AT A GLANCE
+================================================================================
+
+ Backend            ~5,500 lines of Python (app/)
+ Tests              ~1,700 lines - 103 fast tests + 15 slow (model/API-gated)
+ Frontend           ~3,100 lines of TypeScript (frontend/)
+ Commits            157
+ HTTP endpoints     17
+ Ingestion formats  9  (pdf, docx, md, txt, html, csv, json, xml, images via OCR)
+ Eval score         0.927 overall on a 20-case human golden set
+ Deployment         one process (monolith, zero infrastructure) OR three
+                    services + Postgres + Redis + UI via docker compose
+
+ Models in use
+   generation   gpt-4o-mini            (OpenAI, final grounded answer)
+   embeddings   text-embedding-3-small (OpenAI, 1536-dim)
+   reranking    cross-encoder/ms-marco-MiniLM-L-6-v2   (local, CPU)
+   judge        gpt-4o-mini            (citation verification + eval grading)
+   titling      gpt-4o-mini            (~30 tokens per new chat)
+
+
+================================================================================
+ 2. THE DOMAIN — WHAT THIS IS FOR
+================================================================================
+
+ Users
+   Doctors, medical researchers, medical students.
+
+ Knowledge base (what users ingest)
+   - Research papers (PDF)
+   - Clinical guidelines (WHO, NICE, CDC, ...)
+   - Treatment protocols
+   - Medical textbooks
+   - Hospital SOPs
+   - Drug reference documents
+
+ Problem
+   Clinicians and researchers spend hours searching thousands of pages of
+   literature for evidence-based answers. Keyword search misses relevant
+   studies because it cannot match meaning. Generic AI assistants answer
+   fluently but without citations or verification - which makes them unusable
+   in healthcare, where a confident but unsourced or subtly wrong answer is a
+   patient-safety problem, not a UX annoyance.
+
+ Solution
+   Retrieval-Augmented Generation over trusted documents only:
+     1. retrieve the most relevant evidence from the user's own corpus,
+     2. VERIFY every citation against its source before answering,
+     3. return a grounded answer with source references and a confidence score,
+     4. REFUSE to answer when the evidence does not support one.
+
+ Why the architecture looks the way it does
+   Every phase below exists because the domain demands it:
+
+   - Citations are mandatory AND verified. A judge model checks each inline
+     [n] against the chunk it points at and labels it supported / partial /
+     unsupported. An unverified citation is worse than no citation, because it
+     looks authoritative.
+   - Refusal is a feature. Below a confidence threshold the system returns
+     "I don't have enough information", lists the closest sources, and stops.
+     Refusal accuracy is a first-class evaluation metric (currently 1.000).
+   - Provenance down to page and section. A clinician must be able to open the
+     exact page of the exact guideline. Every chunk carries page / section /
+     structural locator all the way into the citation shown in the UI.
+   - Facts by exact match, not similarity. Patient IDs, drug codes and record
+     identifiers are matched exactly - embeddings cannot reliably tell
+     PAT-20260042 from PAT-20260043 (measured at 0.998 cosine similarity).
+   - No outside knowledge. Generation is instructed to use only the retrieved
+     context, so the answer is always attributable to a document the user
+     supplied.
+
+
+================================================================================
+ 3. QUICK START
+================================================================================
+
+ Prerequisites: Python 3.13 (uv-managed venv), Node 20+, Docker (optional),
+ and an OPENAI_API_KEY in .env.
+
+   # 1. optional infrastructure (semantic cache + production stores)
+   docker compose up -d              # redis on 6380, postgres/pgvector on 5433
+
+   # 2. backend  (terminal 1)
+   uv run uvicorn app.main:app --reload
+   #   if uv is blocked by machine policy:
+   #   .\.venv\Scripts\uvicorn.exe app.main:app --reload
+
+   # 3. frontend (terminal 2)
+   cd frontend
+   npm run dev
+
+   open http://localhost:3000        # chat UI
+   open http://localhost:8000/docs   # API docs
+
+ Or run the whole thing in Docker (three services + Postgres + Redis + UI):
+
+   docker compose --profile full up -d --build
+   docker compose --profile infra up -d      # just postgres + redis
+
+ Ingest documents
+   - drag files onto the chat composer (paperclip), or
+   - POST /v1/ingest {"source_dir": "data/corpus", "reset": true}
+
+ Useful commands
+   uv run pytest -m "not slow"       # 103 fast tests, no models, no network
+   uv run pytest                     # everything, incl. model/API tests
+   uv run ruff check .               # lint
+   uv run python scripts/run_eval.py # the regression gate
+
+
+================================================================================
+ 4. ARCHITECTURE
+================================================================================
+
+ A modular monolith with clean seams, so the Phase 9B split into services is
+ mechanical rather than a rewrite.
+
+   ┌──────────────────────────────────────────────────────────────────┐
+   │  frontend/ (Next.js 15, React 19, TypeScript, Tailwind v4)       │
+   │  chat UI - SSE streaming - citations - history in localStorage   │
+   └───────────────────────────┬──────────────────────────────────────┘
+                               │ HTTP + Server-Sent Events
+   ┌───────────────────────────▼──────────────────────────────────────┐
+   │  app/routers/     ask - ingest - cache - feedback - title - health│
+   ├──────────────────────────────────────────────────────────────────┤
+   │  app/modules/pipeline.py      the one place the flow is defined  │
+   │                                                                  │
+   │   ingestion/   load → chunk → embed → index                      │
+   │   retrieval/   dense + sparse → fuse → rerank → confidence       │
+   │   generation/  grounded answer with inline [n] citations         │
+   │   quality/     extract → verify → score → answer or refuse       │
+   │   cache/       semantic cache (Redis)                            │
+   │   autoeval/    capture weak answers → draft → human review       │
+   │   eval/        golden-set harness + regression gate              │
+   ├──────────────────────────────────────────────────────────────────┤
+   │  app/clients/  the ONLY place that talks to an engine            │
+   │   embeddings (openai|local) · vector (chroma|pgvector)           │
+   │   relational (sqlite|postgres) · cache (redis) · llm · reranker  │
+   └──────────────────────────────────────────────────────────────────┘
+
+ The hard rule: nothing outside app/clients/ may import or touch a storage
+ engine's own API. That rule is what made Phase 9A a config change rather than
+ a rewrite, and it is what Phase 9B depends on.
+
+
+================================================================================
+ 5. THE TWO LIFECYCLES
+================================================================================
+
+ 5.1 INGEST  (POST /v1/ingest or /v1/ingest/upload)
+ ------------------------------------------------------------------------
+   file
+    → loader dispatch by suffix          (loaders/ registry)
+    → Document{blocks[]}                 each Block = one contiguous span
+                                         carrying page / section / locator /
+                                         content_type / extracted fields
+    → chunker                            structured formats -> one record per
+                                         chunk; prose -> recursive | fixed |
+                                         semantic (config-selected)
+    → embed (batched)                    OpenAI or local
+    → vector store                       upsert by deterministic chunk id
+    → BM25 index rebuilt from the store  (keyword search stays in sync)
+    → audit row                          which also bumps the corpus version,
+                                         invalidating stale cached answers
+
+   Key property: re-ingesting a document REPLACES its chunks (deterministic
+   ids + delete-before-add), so re-uploading is idempotent and never
+   duplicates or leaves orphans.
+
+ 5.2 ASK  (POST /v1/ask or /v1/ask/stream)
+ ------------------------------------------------------------------------
+   question
+    → identifier scoping     if the question names a record id that exists,
+                             retrieval is scoped to those records by exact
+                             metadata match  (retrieval/identifiers.py)
+    → embed once             reused for cache lookup and, on a miss, storage
+    → semantic cache         HIT requires: cosine >= threshold AND identical
+                             params hash AND current corpus version
+    → retrieve (on a miss)   dense (vector KNN) + sparse (BM25)
+                             → Reciprocal Rank Fusion
+                             → cross-encoder rerank
+                             → retrieval confidence
+    → generate               structured output (instructor): answer,
+                             citations_used, has_sufficient_context,
+                             self_confidence
+    → quality                extract [n] → judge each against its source
+                             → composite confidence
+                             → IDK gate: below threshold, replace the answer
+                               with an honest refusal + closest sources
+    → capture                weak/refused answers become auto-eval candidates
+    → store in cache
+    → response               answer + citations (source, page, section,
+                             locator, verdict) + confidence + breakdown
+
+
+================================================================================
+ 6. REPOSITORY MAP
+================================================================================
+
+ app/
+   main.py                 FastAPI app factory, CORS, lifespan, router wiring
+   config.py               ALL typed settings. Two sources: .env (secrets) and
+                           config/system.yaml (behaviour). No magic numbers in
+                           code - every threshold lives here.
+   logging_config.py       structured JSON logging
+
+   clients/                the only code that knows about engines
+     llm.py                OpenAI + instructor (structured output) + judge
+     embeddings.py         OpenAIEmbedder | LocalEmbedder, same interface
+     reranker.py           local cross-encoder
+     vectorstore.py        facade: get_vector_store() by config
+     vector/base.py        VectorStore protocol, VectorHit, dimension guard
+     vector/chroma.py      ChromaDB backend (zero infrastructure)
+     vector/pgvector.py    Postgres + pgvector backend (production)
+     relational.py         sqlite | postgres dialect adapter
+     db.py                 audit / eval / candidate / feedback queries
+     cache.py              Redis Stack (RediSearch KNN) semantic cache client
+
+   models/schemas.py       every request/response contract (Pydantic)
+
+   modules/
+     pipeline.py           ask() and ask_stream() - the orchestrator
+     ingestion/
+       loader.py           directory walk + format allowlist
+       loaders/base.py     Block / Document IR, @register decorator
+       loaders/*.py        markdown, text, html, pdf, docx, image, csv,
+                           json, xml - one file per format
+       ocr.py              engine-agnostic OCR (easyocr | tesseract)
+       chunker.py          recursive | fixed | semantic | structured
+       indexer.py          embed + write metadata + dimension guard
+       service.py          orchestration, document listing, deletion
+     retrieval/
+       dense.py            vector KNN
+       sparse.py           BM25 (rebuilt from the store, pickled)
+       fusion.py           Reciprocal Rank Fusion
+       hybrid.py           the full dense+sparse+rerank flow
+       confidence.py       score -> 0..1, content-type aware
+       filters.py          metadata filters -> engine-specific queries
+       identifiers.py      exact record lookup for id questions
+       retriever.py        mode dispatch (hybrid | dense)
+     generation/
+       prompt.py           system prompts + context rendering
+       generator.py        answer, streamed answer, chat title
+       schemas.py          GeneratedAnswer / GeneratedTitle contracts
+     quality/
+       extractor.py        pull [n] markers and pair them with claims
+       verifier.py         batched LLM judge -> per-citation verdict
+       confidence.py       composite score maths
+       service.py          assess() -> report + answerable decision
+     cache/service.py      lookup / store / params hash
+     autoeval/             capture -> draft -> human approve
+     eval/                 golden set, metrics, runner, report
+
+   routers/                ask, ingest, cache, feedback, title, health
+   utils/tokens.py         token counting and splitting (tiktoken)
+
+ frontend/
+   app/                    Next.js App Router entry, global CSS (theme tokens)
+   components/             app-shell, chat-view, composer, message, sources,
+                           sidebar, history-view, document-chips, markdown, ui/
+   hooks/                  use-chat (conversations + SSE), use-documents,
+                           use-theme
+   lib/                    api client, types mirroring the backend schemas,
+                           localStorage persistence, formatting helpers
+
+ config/system.yaml        the behaviour of the whole system
+ scripts/                  fetch_corpus, run_eval, cache_loadtest,
+                           migrate_to_postgres
+ eval/golden_set.jsonl     20 human-written evaluation cases
+ tests/                    93 fast + 15 slow
+ docker-compose.yml        redis-stack (6380), pgvector/pg17 (5433)
+
+
+================================================================================
+ 7. BUILD HISTORY — PHASE BY PHASE
+================================================================================
+
+ Each phase shipped with tests, a lint-clean tree, and (from Phase 4 onward)
+ the evaluation harness as a regression gate.
+
+ PHASE 0 — Scaffold
+   Modular-monolith layout, typed config, structured logging, health/ready
+   endpoints, smoke tests.
+
+ PHASE 1 — Thin slice: ingest -> ask
+   Markdown loader, header-aware chunker, local embeddings, ChromaDB, grounded
+   generation with inline [n] citations. Added file upload and idempotent
+   re-ingest (deterministic chunk ids + delete-before-add).
+
+ PHASE 2 — Hybrid retrieval
+   Dense (vector) + sparse (BM25) retrieval fused with Reciprocal Rank Fusion,
+   then reranked by a local cross-encoder, then scored into a single retrieval
+   confidence. Three chunking strategies (recursive, fixed, semantic) selectable
+   by config so they can be benchmarked against each other.
+   WHY: keyword search alone misses paraphrases; vector search alone misses
+   exact terms like drug names and IDs. Fusion gets both.
+
+ PHASE 3 — Quality layer  (the heart of the system)
+   generate -> extract [n] -> verify each citation with a judge model ->
+   composite confidence -> IDK gate.
+     composite = 0.4 * retrieval confidence
+               + 0.4 * citation accuracy (judge verdicts)
+               + 0.2 * model self-confidence
+   Below quality.idk_threshold (0.45) the answer is replaced with an honest
+   refusal that still lists the closest sources.
+   WHY blend three signals: measured on an out-of-corpus question the model
+   self-rated 0.9 while retrieval and citation accuracy were 0.0. Any single
+   signal can be fooled; the blend caught it and refused.
+
+ PHASE 4 — Evaluation harness (the regression gate)
+   20 human-authored cases (simple / multi-hop / ambiguous / no-answer) over a
+   real 154-document corpus. Deterministic metrics (retrieval recall, citation
+   accuracy, refusal accuracy) plus judge-graded metrics (correctness,
+   faithfulness, completeness) against the HUMAN reference answer, so grading
+   is not circular. Runs are persisted and compared against the previous run.
+   PROVEN: the gate caught a deliberate model downgrade (0.969 -> 0.918).
+
+ PHASE 5 — Semantic cache
+   Redis Stack with RediSearch vector KNN. A hit requires three things at once:
+   cosine >= threshold, an identical params hash, and the current corpus
+   version. The corpus version is simply the latest ingestion audit id, so any
+   ingest invalidates stale answers with no coupling to Redis.
+   MEASURED: cold 26s -> exact repeat 190ms -> paraphrase hit -> post-ingest
+   miss. Degrades gracefully: Redis down means the pipeline just runs.
+
+ PHASE 6 — Auto-eval loop
+   Weak answers (low confidence, refusals, thumbs-down) are captured cheaply to
+   a queue. A separate step drafts a reference answer TWICE and only
+   auto-approves when the two runs agree; near-duplicates of existing golden
+   questions are rejected. A human always approves before anything reaches the
+   evaluation set, and approved drafts land in a SEPARATE file so the
+   hand-written golden set stays trustworthy.
+
+ PHASE 7 — Multi-format ingestion (9 formats)
+   Block-based intermediate representation: every chunk descends from exactly
+   one Block and inherits its page, section, locator and content type, so
+   provenance survives every chunking strategy.
+     M1 block IR         M2 txt/html      M3 pdf/docx
+     M4 OCR              M5 csv/json/xml  M6 metadata-filtered retrieval
+   OCR runs ONLY on image files and scanned PDF pages (detected by text
+   density); text PDFs keep native extraction. OCR failure never breaks an
+   ingest - the page is skipped with a warning.
+
+ PHASE 8 — API polish + Next.js chat frontend
+   A ChatGPT-style chat UI: real token-by-token SSE streaming, citations with
+   page/section, conversation history, thumbs feedback wired to the auto-eval
+   loop, and a strictly black-and-white theme (status is carried by icon and
+   contrast, never by colour - which is also the accessible choice).
+   Backend additions: /v1/ask/stream, CORS, /v1/documents, /v1/system,
+   DELETE /v1/documents/{source}, /v1/title.
+
+ PHASE 9A — Postgres / pgvector  (COMPLETE)
+   Storage engines became pluggable:
+     stores.vector      chroma | pgvector
+     stores.relational  sqlite | postgres
+   A VectorStore protocol now sits in front of both backends; Chroma's API no
+   longer leaks into the indexer, retrievers, ingestion service or the
+   readiness check. pgvector uses one table (vector + jsonb) with an HNSW index
+   and a GIN index on metadata; the metadata filters translate to SQL, and an
+   UNSUPPORTED operator raises instead of being silently dropped (a dropped
+   filter would quietly widen a scoped search).
+   scripts/migrate_to_postgres.py copies vectors WITHOUT re-embedding.
+   GATED: eval re-run at 0.927 overall - no regression.
+
+ PHASE 9B — Service split + Docker  (COMPLETE)
+   One codebase, three entrypoints, chosen by RAG_SERVICE_ROLE:
+     ingestion  loaders, chunker, OCR, indexer   (pymupdf, python-docx, easyocr)
+     retrieval  dense, sparse, fusion, rerank    (torch - the only image with it)
+     api        routers, pipeline, generation, quality, cache, auto-eval
+
+   The switch is one function - services/role.py runs_locally(component):
+     mode=monolith                    everything in-process (the default)
+     mode=distributed role=api        retrieval + ingestion become HTTP calls
+     mode=distributed role=retrieval  retrieval runs locally - without this the
+                                      service would call itself forever
+
+   The HTTP clients mirror the in-process function signatures exactly, so
+   pipeline.py and routers/ingest.py contain no distribution logic at all.
+
+   BM25 ownership: the keyword index belongs to whoever queries it, so after
+   indexing, ingestion asks retrieval to rebuild via POST /internal/bm25/rebuild
+   rather than writing the file across a container boundary. A failed rebuild
+   degrades ranking; it does not fail the ingest.
+
+   Docker: three backend images with SPLIT dependency sets
+   (docker/requirements.{core,api,ingestion,retrieval}.txt), so the api image
+   carries no torch and no document parsers. torch is installed CPU-only.
+   Model weights cache to a volume rather than an image layer. All images run
+   as a non-root user with healthchecks. The frontend is a 3-stage standalone
+   Next.js build.
+
+   VERIFIED twice. First as three local processes: a question answered across
+   the seams (confidence 0.978, citation DIABETES.pdf p.4, verdict supported),
+   upload and delete proxied to ingestion, and the cross-service BM25 rebuild
+   observed in the retrieval log. Then as containers: all six up, a document
+   ingested api->ingestion, a question answered api->retrieval, the UI served
+   from its own container, and the vectors stored in pgvector at 1536 dims.
+
+   Image sizes tell the story of the split:
+       api         802 MB   (no torch, no document parsers)
+       frontend    314 MB   (Next.js standalone output)
+       retrieval  2.36 GB   (CPU torch + cross-encoder)
+       ingestion   2.9 GB   (CPU torch + OCR + document parsers)
+   ~1.6 GB removed from the container that serves every request.
+
+
+================================================================================
+ 8. WHAT WAS MEASURED — BUGS FOUND AND FIXED
+================================================================================
+
+ This section exists because the numbers are the interesting part. Each of
+ these was reproduced and measured before being fixed.
+
+ 8.1  Structured records were always refused
+   The cross-encoder reranker is trained on prose. Measured scores on a
+   perfectly relevant chunk:
+       CSV row chunk   -7.18
+       PDF prose chunk -0.09
+   sigmoid(-8) is about 0.0003, which the quality gate reads as "no evidence".
+   Result: EVERY question about a CSV/JSON/XML file was refused regardless of
+   the data. Fix: confidence for record-type chunks comes from the dense cosine
+   instead; ranking still uses the reranker.
+
+ 8.2  Grounded answers were being thrown away
+   Summary-style answers declare their sources in the structured field but
+   write no inline [n] in the prose. Citation accuracy scored 0, the composite
+   fell under the gate, and a correct answer was replaced by a refusal - while
+   the response still listed 5 sources underneath it. Fix: when no inline
+   markers exist, the declared sources are verified instead.
+   Measured on a real CSV question: 0.18 (refused) -> 0.727 (answered).
+
+ 8.3  Different patient IDs returned the same answer
+   Measured query similarity with text-embedding-3-small:
+       PAT-20260004 vs PAT-20260042   0.9982
+       PAT-20260042 vs PAT-20260043   0.9987
+   All far above the 0.90 cache threshold, so the cache served the first
+   patient's answer for every subsequent one. Nearest-neighbour search cannot
+   separate them either. Fix: identifier-aware exact lookup, resolved BEFORE
+   the cache key is built, so two ids can never share a cache entry.
+
+ 8.4  A 10k-line JSON export answered nothing useful
+   Splitting only at the top level left {"patients":[...]} as one 54KB block
+   that token-slicing then cut mid-record: 120 patients became 39 chunks, none
+   holding a whole record, all carrying the same locator.
+   Fix: structure-aware descent - 120 blocks, 120 distinct locators, one record
+   per chunk, each carrying its scalar fields as searchable metadata.
+
+ 8.5  Uploaded CSVs were unreadable to the embedder
+   Spreadsheet exports merge header cells and Excel writes a BOM, so chunks
+   read: "﻿Id | Identifier: MRN | : http://... | : true".
+   Fix: blank columns inherit their group with a positional suffix
+   ("Identifier 2"), empty cells are skipped, files are decoded as utf-8-sig.
+
+ 8.6  "Cannot reach the API" that was not a network problem
+   An unhandled exception in FastAPI is handled OUTSIDE the CORS middleware, so
+   the 500 carried no Access-Control-Allow-Origin header, the browser refused
+   to read it, and the client reported the API as unreachable. The real cause
+   was an embedding-dimension mismatch. Fix: return 409 with an actionable
+   message through the normal response path.
+
+ 8.7  Embedding model scale changes threshold meaning
+   Swapping bge-base (local) for text-embedding-3-small changed what a
+   similarity number means:
+                        bge-base        text-embedding-3-small
+       paraphrase       0.89 - 0.94     0.61 - 0.84
+       unrelated        ~0.47           ~0.006
+   The cache threshold of 0.90 was correct for bge and is nearly dead for
+   OpenAI. Measured recommendation: 0.80 (5/9 correct hits, 0/8 wrong answers).
+   IMPORTANT: the classes overlap - a genuine paraphrase can score 0.59 while
+   two genuinely different questions score 0.75 - so no threshold is perfect.
+   Err high: a cache miss costs a second; a wrong hit serves a confident,
+   fully-cited answer to a question nobody asked.
+
+
+================================================================================
+ 9. CONFIGURATION  (config/system.yaml)
+================================================================================
+
+ Everything that changes behaviour lives here. Secrets live in .env
+ (OPENAI_API_KEY, optionally POSTGRES_DSN) and are never committed.
+
+   models.embedding      provider (openai|local), name, dimensions, batch_size
+   models.generation     the answering model
+   models.judge          citation verification + eval grading
+   models.title          chat naming (enabled, max_words, max_tokens)
+
+   stores.vector         chroma | pgvector
+   stores.relational     sqlite | postgres
+   stores.postgres       dsn, table, HNSW build parameters, pool sizes
+
+   retrieval.mode                          hybrid | dense
+   retrieval.default_top_k                 chunks handed to generation
+   retrieval.dense_candidates / sparse_candidates / rerank_candidates
+   retrieval.rrf_k, dense_weight, sparse_weight
+   retrieval.structured_confidence_from_dense   see 8.1
+   retrieval.identifier_match_confidence        see 8.3
+
+   ingestion.formats.enabled               which file types are accepted
+   ingestion.formats.pdf.scanned_text_density_threshold
+   ingestion.formats.ocr                   enabled, engine, languages, dpi
+   ingestion.formats.csv.rows_per_chunk
+   ingestion.formats.json                  max_record_tokens, max_depth,
+                                           extract_fields, id_keys
+   ingestion.chunking                      strategy, max tokens, overlap
+
+   quality.verify_citations                run the judge (false = cheaper)
+   quality.idk_threshold                   refuse below this confidence
+   quality.confidence_weights              retrieval / citation / self
+
+   cache.enabled, redis_url, threshold, ttl_seconds
+   autoeval.flag_confidence_threshold, dedup_threshold, agreement_threshold
+   eval.golden_path, retrieval_k, regression_tolerance
+
+
+================================================================================
+ 10. HTTP API
+================================================================================
+
+   GET    /health                       liveness
+   GET    /ready                        dependency checks (vectors, sqlite)
+
+   POST   /v1/ingest                    ingest a directory  {source_dir, reset}
+   POST   /v1/ingest/upload             multipart upload (the UI path)
+   GET    /v1/documents                 what is searchable, with chunk counts
+   DELETE /v1/documents/{source}        remove a document, rebuild BM25,
+                                        invalidate the cache
+   GET    /v1/system                    model wiring + corpus size
+
+   POST   /v1/ask                       grounded answer (JSON)
+   POST   /v1/ask/stream                same pipeline as SSE:
+                                          meta -> delta* -> final
+                                        the final frame is AUTHORITATIVE - it
+                                        carries verified citations, confidence
+                                        and any gate replacement
+   POST   /v1/title                     name a chat from its first question
+
+   GET    /v1/cache/stats               hits, misses, hit rate
+   POST   /v1/cache/flush               drop cached answers
+
+   POST   /v1/feedback                  up | down | retracted
+   GET    /v1/eval/candidates           the auto-eval review queue
+   POST   /v1/eval/candidates/process   draft reference answers
+   POST   /v1/eval/candidates/{id}/approve | /reject
+
+ Request options that matter
+   AskRequest.filters.source        one filename or a list - this is how an
+                                    attached file scopes a question
+   AskRequest.filters.file_type     pdf | docx | csv | json | ...
+   AskRequest.mode                  hybrid | dense (per-request override)
+
+
+================================================================================
+ 11. FRONTEND
+================================================================================
+
+ Next.js 15 (App Router), React 19, TypeScript strict, Tailwind v4.
+ Strictly black and white: status is conveyed by icon and contrast level, never
+ by hue, which is also the accessible pattern.
+
+ Behaviour worth knowing
+   - Answers stream token by token; the terminal frame replaces the streamed
+     draft with the verified answer, and says so when the quality gate swapped
+     in a refusal.
+   - Attaching a file scopes the question to it. The composer footer states the
+     scope ("Answering from DIABETES.pdf") so the narrowing is never invisible.
+   - Attachments render as cards above the question, like ChatGPT. Clicking the
+     paperclip opens the file picker directly and ingestion starts on
+     selection - there is no confirm step.
+   - Conversations are named by a model from the first question ("How do I
+     install FastAPI on Windows?" -> "FastAPI Setup on Windows"), created
+     lazily on the first message, and stored in localStorage because the
+     backend is stateless.
+   - Sources are collapsible and show filename, page and the judge's verdict.
+   - Thumbs up/down toggle, and retracting a thumbs-down withdraws the
+     auto-eval candidate it created.
+
+
+================================================================================
+ 12. DATA STORES
+================================================================================
+
+   Vectors        ChromaDB (default, on disk) or Postgres + pgvector
+   Keyword index  BM25, rebuilt from the vector store after every ingest and
+                  pickled to disk
+   Operational    SQLite (default) or Postgres:
+                    ingestion_audit    every ingest; its max id is the corpus
+                                       version used for cache invalidation
+                    eval_runs / eval_case_results
+                    eval_candidates    the auto-eval review queue
+                    feedback           append-only; a retraction is a new row
+   Cache          Redis Stack, HNSW COSINE index, entries carry the params hash
+                  and corpus version as tags
+
+ Switching to Postgres
+   uv add "psycopg[binary,pool]"
+   python scripts/migrate_to_postgres.py --dry-run
+   python scripts/migrate_to_postgres.py
+   then set stores.vector: pgvector and stores.relational: postgres
+
+ NOTE: psycopg is not currently installed (uv was blocked by machine policy),
+ so the Postgres code paths are written and SQL-verified against a live
+ container but have not been run from Python. They fail with an actionable
+ message if the driver is missing.
+
+
+================================================================================
+ 13. EVALUATION
+================================================================================
+
+   uv run python scripts/run_eval.py              # single run
+   uv run python scripts/run_eval.py --benchmark  # compare all 3 chunkers
+
+ Latest run (recursive chunker, 20 cases, text-embedding-3-small):
+
+   overall_score        0.927
+   retrieval_recall     0.925
+   citation_accuracy    0.713
+   correctness          0.970
+   faithfulness         0.990
+   completeness         0.940
+   idk_accuracy         1.000
+
+   by type:  simple 0.959 · multi_hop 0.872 · ambiguous 0.780 · no_answer 1.000
+
+ Reading these honestly
+   - idk_accuracy 1.000 means the system refused every question it should have
+     refused. For this domain that is the single most important number.
+   - faithfulness 0.990 means answers stayed inside their sources.
+   - citation_accuracy 0.713 is the weakest metric and the obvious next target:
+     it counts partial credit for citations the judge rates "partial".
+   - ambiguous 0.780 is expected - those cases are deliberately under-specified.
+
+
+================================================================================
+ 14. KNOWN LIMITATIONS AND OPEN WORK
+================================================================================
+
+ Domain leftovers (the project is medical; these are still generic-RAG)
+   - prompt.SYSTEM_PROMPT still says "technical documentation assistant for
+     FastAPI". Every medical answer is currently produced under that persona.
+   - eval/golden_set.jsonl is 20 FastAPI questions, so the regression gate
+     measures a domain the product no longer targets.
+   - scripts/fetch_corpus.py fetches FastAPI documentation.
+   - autoeval draft prompt refers to a "FastAPI docs assistant".
+   These should be retired and replaced with medical equivalents.
+
+ Engineering
+   - cache.threshold is still 0.90, which is near-dead for the current
+     embedding model; 0.80 is the measured recommendation (see 8.7).
+   - autoeval.dedup_threshold and agreement_threshold were calibrated for the
+     old embedding model and need the same treatment.
+   - psycopg is not installed, so the Postgres paths are unrun from Python.
+   - .jsonl is not a registered format, despite being a natural fit for the
+     record-per-line model.
+   - Only the top level of a deeply nested JSON object is exploded; a single
+     very deep object still becomes one large block (then token-capped).
+   - frontend/components/upload-dialog.tsx is no longer rendered (the composer
+     replaced it) but is still in the tree.
+
+ Environment notes (Windows)
+   - uv.exe is intermittently blocked by an Application Control policy. The
+     venv binaries work directly: .\.venv\Scripts\uvicorn.exe,
+     .\.venv\Scripts\python.exe -m pytest
+   - The same policy blocks a DLL inside easyocr, so the slow real-OCR test
+     fails on this machine. The fast suite fakes OCR and is unaffected.
+   - Never run two `npm run dev` servers: they share .next and corrupt each
+     other's CSS chunks, producing a completely unstyled page.
+   - Redis is mapped to host 6380 and Postgres to 5433 because 6379/5432 are
+     commonly taken.
+
+
+================================================================================
+ 15. DESIGN PRINCIPLES USED THROUGHOUT
+================================================================================
+
+ 1. Config over constants. Every threshold, model name and strategy lives in
+    config/system.yaml. There are no magic numbers in the code.
+ 2. Measure before fixing. Every bug in section 8 was reproduced and quantified
+    first; several turned out to have a different cause than the symptom
+    suggested.
+ 3. Refusing is allowed. The system is designed to say "I don't know" and is
+    graded on how well it does so.
+ 4. Degrade, never crash. Redis down, OCR missing, a title model failing, a
+    malformed JSON file - each is logged and stepped around. Ingest and ask
+    keep working.
+ 5. Fail loudly where silence is dangerous. An unsupported metadata filter
+    raises instead of being dropped, because a silently ignored filter widens a
+    scoped search without telling anyone.
+ 6. One seam per engine. Everything engine-specific lives in app/clients/.
+ 7. Every phase ships with tests and, from Phase 4 on, must pass the evaluation
+    gate before the next phase starts.
+
+================================================================================
+ END
+================================================================================
