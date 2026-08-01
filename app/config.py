@@ -9,6 +9,7 @@ No magic numbers in code — thresholds, model names and paths live in system.ya
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -199,6 +200,25 @@ class StoresConfig(BaseModel):
     postgres: PostgresConfig = PostgresConfig()
 
 
+class ServicesConfig(BaseModel):
+    """Phase 9B: run as one process or as three (api / ingestion / retrieval).
+
+    `monolith` is the default and imports every module in-process — that is what
+    tests and a laptop run use, and it keeps the split from becoming mandatory.
+    `distributed` makes the api process call the other two over HTTP instead.
+
+    Which role a process plays comes from the RAG_SERVICE_ROLE environment
+    variable, not from here, because it differs per container while this file is
+    shared by all of them.
+    """
+
+    mode: str = "monolith"  # monolith | distributed
+    retrieval_url: str = "http://localhost:8011"
+    ingestion_url: str = "http://localhost:8012"
+    timeout_seconds: float = 120.0  # OCR and large ingests are slow; be generous
+    connect_timeout_seconds: float = 5.0
+
+
 class CorsConfig(BaseModel):
     """Browser access for the Phase 8 frontend (dev server on :3000)."""
 
@@ -282,6 +302,7 @@ class AppConfig(BaseModel):
     cache: CacheConfig = CacheConfig()
     autoeval: AutoEvalConfig = AutoEvalConfig()
     stores: StoresConfig = StoresConfig()
+    services: ServicesConfig = ServicesConfig()
 
     def postgres_dsn(self) -> str:
         """Effective DSN: the environment wins over the yaml dev default."""
@@ -293,11 +314,50 @@ def get_settings() -> Settings:
     return Settings()
 
 
+ENV_PREFIX = "RAG_"
+ENV_NESTED_SEPARATOR = "__"
+
+
+def _coerce(raw: str):
+    """Environment values are strings; give booleans and numbers their real types."""
+    lowered = raw.strip().lower()
+    if lowered in ("true", "false"):
+        return lowered == "true"
+    for cast in (int, float):
+        try:
+            return cast(raw)
+        except ValueError:
+            pass
+    return raw
+
+
+def _apply_env_overrides(data: dict) -> dict:
+    """Let the environment override any yaml key: RAG_STORES__VECTOR=pgvector.
+
+    Containers share one config file but need different wiring — the api process
+    talks to `http://retrieval:8011` while a laptop run talks to localhost. Values
+    that differ per deployment belong in the environment, not in git.
+    """
+    for key, raw in os.environ.items():
+        if not key.startswith(ENV_PREFIX) or len(key) <= len(ENV_PREFIX):
+            continue
+        path = key[len(ENV_PREFIX) :].lower().split(ENV_NESTED_SEPARATOR)
+        node = data
+        for part in path[:-1]:
+            child = node.get(part)
+            if not isinstance(child, dict):
+                child = {}
+                node[part] = child
+            node = child
+        node[path[-1]] = _coerce(raw)
+    return data
+
+
 @lru_cache
 def get_config() -> AppConfig:
-    """Load and validate config/system.yaml (falls back to defaults if absent)."""
+    """Load and validate config/system.yaml, then apply environment overrides."""
     path = get_settings().config_path
     data: dict = {}
     if path.exists():
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return AppConfig(**data)
+    return AppConfig(**_apply_env_overrides(data))
