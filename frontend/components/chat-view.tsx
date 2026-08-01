@@ -22,9 +22,11 @@ export function ChatView({
   onRegenerate,
   onFeedback,
   onNewChat,
-  onOpenUpload,
+  onFiles,
   ready,
   documents,
+  uploading,
+  uploadError,
   onRemoveDocument,
   scope,
 }: {
@@ -35,10 +37,12 @@ export function ChatView({
   onRegenerate: (message: ChatMessage) => void;
   onFeedback: (messageId: string, rating: "up" | "down" | null) => void;
   onNewChat: () => void;
-  onOpenUpload: () => void;
+  onFiles: (files: FileList | null) => void;
   ready: boolean;
-  /** Staged uploads — chips above the composer until the next message carries them. */
+  /** Staged uploads — chips inside the composer until the next message carries them. */
   documents: IndexedDocument[];
+  uploading: string[];
+  uploadError: string | null;
   onRemoveDocument: (source: string) => Promise<void>;
   /** Every file this chat answers from, for the composer's scope line. */
   scope: string[];
@@ -131,10 +135,12 @@ export function ChatView({
       <Composer
         onSubmit={onSend}
         onStop={onStop}
-        onOpenUpload={onOpenUpload}
+        onFiles={onFiles}
         busy={busy}
         disabled={!ready}
         documents={documents}
+        uploading={uploading}
+        uploadError={uploadError}
         onRemoveDocument={onRemoveDocument}
         scope={scope}
       />

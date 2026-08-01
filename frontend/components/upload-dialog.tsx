@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, CloudUpload, Loader2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertCircle, CheckCircle2, CloudUpload, FileText, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError, uploadDocuments } from "@/lib/api";
-import type { IngestResponse } from "@/lib/types";
 import { cn, formatBytes } from "@/lib/utils";
 
 /** Mirrors the backend allowlist (`ingestion.formats.enabled` -> allowed_suffixes()). */
@@ -13,6 +12,17 @@ const ACCEPT = [
   ".csv", ".json", ".xml",
   ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp", ".gif",
 ].join(",");
+
+type Status = "uploading" | "done" | "failed";
+
+interface Item {
+  file: File;
+  status: Status;
+}
+
+const keyOf = (file: File) => `${file.name}:${file.size}`;
+/** `ingest_files` flattens uploads to their basename — that becomes the `source`. */
+const sourceOf = (file: File) => file.name.split(/[\\/]/).pop() || file.name;
 
 export function UploadDialog({
   open,
@@ -24,49 +34,72 @@ export function UploadDialog({
   /** Receives the ingested `source` values (the backend keys documents by basename). */
   onIngested?: (sources: string[]) => void | Promise<void>;
 }) {
-  const [files, setFiles] = useState<File[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<IngestResponse | null>(null);
+  const [chunks, setChunks] = useState(0);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    // Each opening is a fresh session — otherwise the last upload's rows linger.
+    setItems([]);
+    setError(null);
+    setChunks(0);
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  const mark = useCallback((batch: File[], status: Status) => {
+    const keys = new Set(batch.map(keyOf));
+    setItems((prev) =>
+      prev.map((item) => (keys.has(keyOf(item.file)) ? { ...item, status } : item)),
+    );
+  }, []);
+
+  /** Send a batch straight to the API — adding a file *is* the ingest trigger. */
+  const ingest = useCallback(
+    async (batch: File[]) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await uploadDocuments(batch, false);
+        setChunks((n) => n + result.chunks_created);
+        mark(batch, "done");
+        await onIngested?.(batch.map(sourceOf));
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Upload failed");
+        mark(batch, "failed");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [mark, onIngested],
+  );
+
   if (!open) return null;
 
   function addFiles(incoming: FileList | null) {
-    if (!incoming) return;
-    setResult(null);
-    setError(null);
-    setFiles((prev) => {
-      const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
-      return [...prev, ...Array.from(incoming).filter((f) => !seen.has(`${f.name}:${f.size}`))];
-    });
+    // One ingest at a time: concurrent uploads would race the BM25 rebuild.
+    if (!incoming || busy) return;
+    const seen = new Set(items.map((i) => keyOf(i.file)));
+    const fresh = Array.from(incoming).filter((f) => !seen.has(keyOf(f)));
+    if (fresh.length === 0) return;
+    setItems((prev) => [...prev, ...fresh.map((file) => ({ file, status: "uploading" as const }))]);
+    void ingest(fresh);
   }
 
-  async function submit() {
-    if (files.length === 0 || busy) return;
-    setBusy(true);
-    setError(null);
-    // `ingest_files` flattens uploads to their basename, so that is the `source`
-    // the index (and therefore the chip list) will be keyed by.
-    const sources = files.map((f) => f.name.split(/[\\/]/).pop() || f.name);
-    try {
-      setResult(await uploadDocuments(files, false));
-      setFiles([]);
-      await onIngested?.(sources); // refresh the sidebar counts and composer chips
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Upload failed");
-    } finally {
-      setBusy(false);
-    }
+  function retry() {
+    const failed = items.filter((i) => i.status === "failed").map((i) => i.file);
+    if (failed.length === 0 || busy) return;
+    mark(failed, "uploading");
+    void ingest(failed);
   }
+
+  const hasFailures = items.some((i) => i.status === "failed");
+  const indexed = items.filter((i) => i.status === "done").length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -81,8 +114,8 @@ export function UploadDialog({
           <div>
             <h2 className="text-sm font-semibold">Upload documents</h2>
             <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-              Indexed into the same pipeline as your corpus. Re-uploading a file replaces
-              its chunks.
+              Indexing starts as soon as you add a file. Re-uploading one replaces its
+              chunks.
             </p>
           </div>
           <Button size="icon" onClick={onClose} aria-label="Close">
@@ -104,6 +137,7 @@ export function UploadDialog({
           className={cn(
             "mt-4 rounded-xl border border-dashed px-4 py-7 text-center transition-colors duration-200",
             dragging ? "border-accent bg-accent/5" : "border-border bg-surface/40",
+            busy && "opacity-60",
           )}
         >
           <CloudUpload className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden="true" />
@@ -115,6 +149,7 @@ export function UploadDialog({
             variant="secondary"
             size="sm"
             className="mt-3"
+            disabled={busy}
             onClick={() => inputRef.current?.click()}
           >
             Browse files
@@ -132,26 +167,32 @@ export function UploadDialog({
           />
         </div>
 
-        {files.length > 0 ? (
+        {items.length > 0 ? (
           <ul className="scrollbar-thin mt-3 max-h-40 space-y-1.5 overflow-y-auto">
-            {files.map((file) => (
+            {items.map(({ file, status }) => (
               <li
-                key={`${file.name}:${file.size}`}
+                key={keyOf(file)}
                 className="flex items-center gap-2 rounded-lg border border-border bg-surface/50 px-2.5 py-1.5"
               >
+                <span className="shrink-0" aria-hidden="true">
+                  {status === "uploading" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                  ) : status === "done" ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                  )}
+                </span>
                 <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
                   {file.name}
                 </span>
                 <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                  {formatBytes(file.size)}
+                  {status === "uploading"
+                    ? "indexing…"
+                    : status === "failed"
+                      ? "failed"
+                      : formatBytes(file.size)}
                 </span>
-                <Button
-                  size="icon"
-                  aria-label={`Remove ${file.name}`}
-                  onClick={() => setFiles((prev) => prev.filter((f) => f !== file))}
-                >
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                </Button>
               </li>
             ))}
           </ul>
@@ -163,11 +204,10 @@ export function UploadDialog({
           </p>
         ) : null}
 
-        {result ? (
+        {indexed > 0 && !busy ? (
           <p className="mt-3 flex items-start gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-[12px] text-accent">
-            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            Indexed {result.documents_ingested} document
-            {result.documents_ingested === 1 ? "" : "s"} into {result.chunks_created} chunks.
+            <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            Indexed {indexed} document{indexed === 1 ? "" : "s"} into {chunks} chunks.
           </p>
         ) : null}
 
@@ -181,24 +221,16 @@ export function UploadDialog({
           </p>
         ) : null}
 
-        <Button
-          variant="primary"
-          size="md"
-          onClick={result ? onClose : submit}
-          disabled={busy || (!result && files.length === 0)}
-          className="mt-4 w-full"
-        >
-          {busy ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              Ingesting…
-            </>
-          ) : result ? (
-            "Done"
-          ) : (
-            "Ingest files"
-          )}
-        </Button>
+        <div className="mt-4 flex gap-2">
+          {hasFailures ? (
+            <Button variant="secondary" size="md" onClick={retry} disabled={busy} className="flex-1">
+              Retry
+            </Button>
+          ) : null}
+          <Button variant="primary" size="md" onClick={onClose} className="flex-1">
+            Done
+          </Button>
+        </div>
       </div>
     </div>
   );

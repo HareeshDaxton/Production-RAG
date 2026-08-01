@@ -5,7 +5,6 @@ import { Menu } from "lucide-react";
 import { ChatView } from "@/components/chat-view";
 import { HistoryView } from "@/components/history-view";
 import { Sidebar, type View } from "@/components/sidebar";
-import { UploadDialog } from "@/components/upload-dialog";
 import { Button } from "@/components/ui/button";
 import { useChat } from "@/hooks/use-chat";
 import { useDocuments } from "@/hooks/use-documents";
@@ -29,11 +28,24 @@ export function AppShell() {
     detach,
   } = useChat();
 
-  const { documents, system, refresh: refreshDocuments, remove: removeDocument } = useDocuments();
+  const {
+    documents,
+    system,
+    uploading,
+    uploadError,
+    upload,
+    remove: removeDocument,
+  } = useDocuments();
 
   // Chips show only what is staged for the next message; once sent, the files
   // move onto that message's bubble. The sidebar still counts the whole corpus.
   const stagedDocuments = documents.filter((d) => staged.includes(d.source));
+
+  /** Picked or dropped files ingest straight away, then stage for the next message. */
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    attach(await upload(Array.from(files)));
+  }
 
   async function removeAttachment(source: string) {
     await removeDocument(source); // index-wide delete
@@ -43,7 +55,6 @@ export function AppShell() {
   const [view, setView] = useState<View>("chat");
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [uploadOpen, setUploadOpen] = useState(false);
 
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -78,8 +89,10 @@ export function AppShell() {
             onRegenerate={regenerate}
             onFeedback={setFeedback}
             onNewChat={newChat}
-            onOpenUpload={() => setUploadOpen(true)}
+            onFiles={handleFiles}
             documents={stagedDocuments}
+            uploading={uploading}
+            uploadError={uploadError}
             onRemoveDocument={removeAttachment}
             scope={scope}
           />
@@ -94,17 +107,6 @@ export function AppShell() {
           />
         )}
       </div>
-
-      {/* Refresh on ingest so the sidebar counts update immediately, and pin the
-          new files to the chat they were uploaded from. */}
-      <UploadDialog
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
-        onIngested={async (sources) => {
-          attach(sources);
-          await refreshDocuments();
-        }}
-      />
     </div>
   );
 }

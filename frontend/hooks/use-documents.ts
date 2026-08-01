@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { deleteDocument, getDocuments, getSystemInfo } from "@/lib/api";
+import { ApiError, deleteDocument, getDocuments, getSystemInfo, uploadDocuments } from "@/lib/api";
 import type { IndexedDocument, SystemInfo } from "@/lib/types";
+
+/** `ingest_files` flattens uploads to their basename — that becomes the `source`. */
+const sourceOf = (file: File) => file.name.split(/[\\/]/).pop() || file.name;
 
 /**
  * The indexed corpus, shared by the sidebar counters and the composer's file
@@ -12,6 +15,8 @@ import type { IndexedDocument, SystemInfo } from "@/lib/types";
 export function useDocuments() {
   const [documents, setDocuments] = useState<IndexedDocument[]>([]);
   const [system, setSystem] = useState<SystemInfo | null>(null);
+  const [uploading, setUploading] = useState<string[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -27,6 +32,27 @@ export function useDocuments() {
     void refresh();
   }, [refresh]);
 
+  /** Ingest picked/dropped files immediately; returns the sources that landed. */
+  const upload = useCallback(
+    async (files: File[]): Promise<string[]> => {
+      if (files.length === 0) return [];
+      const sources = files.map(sourceOf);
+      setUploadError(null);
+      setUploading((prev) => [...prev, ...sources]);
+      try {
+        await uploadDocuments(files, false);
+        await refresh();
+        return sources;
+      } catch (err) {
+        setUploadError(err instanceof ApiError ? err.message : "Upload failed");
+        return [];
+      } finally {
+        setUploading((prev) => prev.filter((s) => !sources.includes(s)));
+      }
+    },
+    [refresh],
+  );
+
   const remove = useCallback(
     async (source: string) => {
       await deleteDocument(source);
@@ -35,5 +61,5 @@ export function useDocuments() {
     [refresh],
   );
 
-  return { documents, system, refresh, remove };
+  return { documents, system, uploading, uploadError, refresh, upload, remove };
 }
