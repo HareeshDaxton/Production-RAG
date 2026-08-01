@@ -16,7 +16,7 @@ all three against the same corpus).
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.config import ChunkingConfig
 from app.modules.ingestion.loader import Block, Document
@@ -44,6 +44,9 @@ class Chunk:
     content_type: str
     char_count: int
     created_at: str
+    # Scalar fields lifted from a structured record; indexed as metadata so an
+    # identifier question can be answered by exact match instead of by similarity.
+    fields: dict = field(default_factory=dict)
 
 
 # Structured formats are records, not prose — chunked by block (one record per
@@ -90,6 +93,7 @@ def _make_chunk(doc: Document, block: Block, idx: int, text: str, strategy: str)
         content_type=block.content_type,
         char_count=len(text),
         created_at=str(doc.metadata.get("created_at", "")),
+        fields=dict(block.fields),
     )
 
 

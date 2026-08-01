@@ -24,6 +24,9 @@ class Block:
     section_path: str | None = None  # heading breadcrumb, e.g. "Guide > Auth > Rate Limiting"
     locator: str | None = None  # structured pointer, e.g. "rows 10-19" / "$.items[3]"
     content_type: str = "text"  # text|table|code|row|object|element|ocr
+    # Scalar fields lifted out of a structured record (e.g. {"patient_id": "PAT-1"}).
+    # They become chunk metadata, which is what makes exact filtering possible.
+    fields: dict = field(default_factory=dict)
 
 
 @dataclass
