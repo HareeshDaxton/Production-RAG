@@ -1,10 +1,20 @@
-# Phase 5: Redis Stack (RediSearch) for the semantic cache.
-# Phase 9: Postgres + pgvector as the production vector/relational store.
-#   docker compose up -d              # start both
-#   docker compose up -d redis        # cache only (pgvector is optional: the
-#                                       chroma/sqlite backends still work)
-#   docker compose down               # stop
+# Full stack: Postgres/pgvector + Redis + the three services + the chat UI.
+#
+#   docker compose up -d                      infrastructure only (postgres +
+#                                              redis) - run the app locally as a
+#                                              monolith against it
+#   docker compose --profile full up -d --build   the whole stack, split into
+#                                              three services + the chat UI
+#   docker compose logs -f api
+#   docker compose down                        stop      (add -v to wipe data)
+#
+# Running the whole stack sets services.mode=distributed via RAG_SERVICES__MODE,
+# so the api process calls retrieval and ingestion over HTTP. Running the code
+# outside compose keeps the monolith default and needs no infrastructure at all.
 services:
+
+  # --- infrastructure -------------------------------------------------------
+
   redis:
     image: redis/redis-stack:7.4.0-v3   # Redis + RediSearch (vector search) + RedisInsight
     container_name: prod-rag-redis
@@ -37,6 +47,93 @@ services:
       timeout: 3s
       retries: 5
 
+  # --- services -------------------------------------------------------------
+
+  # Owns torch. Scale this one when queries are the bottleneck.
+  retrieval:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.retrieval
+    container_name: prod-rag-retrieval
+    profiles: ["full"]
+    environment:
+      RAG_SERVICE_ROLE: retrieval
+      RAG_SERVICES__MODE: distributed
+      RAG_STORES__VECTOR: pgvector
+      RAG_STORES__RELATIONAL: postgres
+      POSTGRES_DSN: postgresql://rag:rag@postgres:5432/rag
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+    volumes:
+      - service-data:/srv/data      # BM25 index + cached model weights
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports:
+      - "8011:8011"                 # exposed for debugging; the api uses the network name
+
+  # Bursty and slow (OCR). Isolated so it never competes with live questions.
+  ingestion:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ingestion
+    container_name: prod-rag-ingestion
+    profiles: ["full"]
+    environment:
+      RAG_SERVICE_ROLE: ingestion
+      RAG_SERVICES__MODE: distributed
+      RAG_SERVICES__RETRIEVAL_URL: http://retrieval:8011   # for BM25 rebuilds
+      RAG_STORES__VECTOR: pgvector
+      RAG_STORES__RELATIONAL: postgres
+      POSTGRES_DSN: postgresql://rag:rag@postgres:5432/rag
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+    volumes:
+      - service-data:/srv/data
+      - ./data/corpus:/srv/data/corpus:ro   # optional: ingest a directory from the host
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports:
+      - "8012:8012"
+
+  # The public API. No torch, no document parsers — it orchestrates.
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: prod-rag-api
+    profiles: ["full"]
+    environment:
+      RAG_SERVICE_ROLE: api
+      RAG_SERVICES__MODE: distributed
+      RAG_SERVICES__RETRIEVAL_URL: http://retrieval:8011
+      RAG_SERVICES__INGESTION_URL: http://ingestion:8012
+      RAG_STORES__VECTOR: pgvector
+      RAG_STORES__RELATIONAL: postgres
+      RAG_CACHE__REDIS_URL: redis://redis:6379
+      POSTGRES_DSN: postgresql://rag:rag@postgres:5432/rag
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      retrieval: { condition: service_started }
+      ingestion: { condition: service_started }
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Inlined into the client bundle at build time, so it must be the URL the
+        # *browser* uses — not the docker network name.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    container_name: prod-rag-frontend
+    profiles: ["full"]
+    depends_on:
+      api: { condition: service_started }
+    ports:
+      - "3000:3000"
+
 volumes:
   redis-data:
   postgres-data:
+  service-data:
