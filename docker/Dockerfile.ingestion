@@ -1,0 +1,42 @@
+# ingestion service — loaders, OCR, chunking, indexing.
+# Bursty and slow (OCR can take a minute per scanned page), so it is isolated
+# from the request path and scaled independently.
+FROM python:3.13-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /srv
+
+# OpenCV (pulled in by easyocr) needs these shared libraries at runtime.
+RUN apt-get update && apt-get install --no-install-recommends -y \
+        libglib2.0-0 libgl1 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# easyocr depends on torch, so install the CPU build first — otherwise pip pulls
+# the default CUDA wheel and the image gains ~2GB of GPU runtime it never uses.
+COPY docker/requirements.core.txt docker/requirements.ingestion.txt docker/
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r docker/requirements.ingestion.txt
+
+COPY app/ app/
+COPY config/ config/
+
+# /srv/data must exist *in the image* and be owned by rag: Docker seeds an empty
+# named volume from the image directory, ownership included. Without this the
+# mountpoint is created root-owned and the non-root process cannot write to it.
+RUN useradd --create-home --uid 10001 rag \
+    && mkdir -p /srv/data \
+    && chown -R rag:rag /srv
+USER rag
+
+# EasyOCR downloads ~90MB of weights on first use; keep them on the volume so a
+# container restart does not re-download them.
+ENV RAG_SERVICE_ROLE=ingestion \
+    EASYOCR_MODULE_PATH=/srv/data/.easyocr
+EXPOSE 8012
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8012/health',timeout=4).status_code==200 else 1)"
+
+CMD ["uvicorn", "app.services.ingestion_service:app", "--host", "0.0.0.0", "--port", "8012"]

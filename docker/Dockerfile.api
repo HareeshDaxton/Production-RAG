@@ -1,0 +1,27 @@
+# api service — routers, pipeline, generation, quality, cache, auto-eval.
+# Deliberately carries no torch and no document parsers: retrieval and ingestion
+# own those, which is the whole point of the Phase 9B split.
+FROM python:3.13-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /srv
+
+COPY docker/requirements.core.txt docker/requirements.api.txt docker/
+RUN pip install --no-cache-dir -r docker/requirements.api.txt
+
+COPY app/ app/
+COPY config/ config/
+
+# Non-root: nothing here needs to write outside the mounted data volume.
+RUN useradd --create-home --uid 10001 rag && chown -R rag:rag /srv
+USER rag
+
+ENV RAG_SERVICE_ROLE=api
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8000/health',timeout=4).status_code==200 else 1)"
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

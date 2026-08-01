@@ -1,0 +1,20 @@
+# Build context hygiene: never ship secrets, caches or local state into an image.
+.git
+.venv
+venv
+data
+frontend
+tests
+eval
+sample_docs
+docs
+*.md
+!README.md
+.env
+.env.*
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+uv.lock

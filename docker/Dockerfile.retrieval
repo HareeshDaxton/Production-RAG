@@ -1,0 +1,38 @@
+# retrieval service — dense + BM25 + fusion + cross-encoder rerank.
+# The only image that needs torch. Scale this one when queries are the
+# bottleneck; the cross-encoder is the slowest step of a question.
+FROM python:3.13-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /srv
+
+RUN apt-get update && apt-get install --no-install-recommends -y libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU-only torch: the GPU build is several GB larger and unused here.
+COPY docker/requirements.core.txt docker/requirements.retrieval.txt docker/
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r docker/requirements.retrieval.txt
+
+COPY app/ app/
+COPY config/ config/
+
+# /srv/data must exist *in the image* and be owned by rag: Docker seeds an empty
+# named volume from the image directory, ownership included. Without this the
+# mountpoint is created root-owned and the non-root process cannot write to it.
+RUN useradd --create-home --uid 10001 rag \
+    && mkdir -p /srv/data \
+    && chown -R rag:rag /srv
+USER rag
+
+# Cache the cross-encoder weights on the volume, not in the image layer.
+ENV RAG_SERVICE_ROLE=retrieval \
+    HF_HOME=/srv/data/.hf
+EXPOSE 8011
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD python -c "import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8011/health',timeout=4).status_code==200 else 1)"
+
+CMD ["uvicorn", "app.services.retrieval_service:app", "--host", "0.0.0.0", "--port", "8011"]

@@ -1,0 +1,3 @@
+# api service = core only. No torch, no document parsers: it orchestrates,
+# generates and scores, and calls the other two services for the rest.
+-r requirements.core.txt
