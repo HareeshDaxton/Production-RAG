@@ -67,11 +67,17 @@ ollama                 # only needed if models.judge points at a local Ollama
 # Installed as a dev group, not with the line above:
 #   uv add --dev pytest pytest-asyncio ruff
 
+# --- Postgres / pgvector (Phase 9A) ------------------------------------------
+# Only needed when stores.vector = pgvector or stores.relational = postgres; the
+# default chroma+sqlite pair needs nothing. The pool extra is required, not optional:
+# FastAPI's sync endpoints run in a threadpool and must not share one connection.
+psycopg[binary,pool]   # server runs via docker compose (pgvector/pgvector:pg17)
+# No `pgvector` package: embeddings are sent as '[...]' text and cast ::vector,
+# which keeps the dependency surface smaller.
+
 # =============================================================================
-# DEFERRED — Phase 9 (service split + Postgres/pgvector). Uncomment when started:
+# DEFERRED — Phase 9B (service split + observability). Uncomment when started:
 #
-#   psycopg[binary]            # Postgres driver
-#   pgvector                   # pgvector integration
 #   celery                     # background workers
 #   prometheus-client          # metrics
 #   opentelemetry-sdk
