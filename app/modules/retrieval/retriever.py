@@ -13,6 +13,7 @@ from app.modules.retrieval.confidence import retrieval_confidence
 from app.modules.retrieval.dense import RetrievedChunk, dense_retrieve
 from app.modules.retrieval.filters import Filters
 from app.modules.retrieval.hybrid import hybrid_retrieve
+from app.services.role import RETRIEVAL, runs_locally
 
 VALID_MODES = ("hybrid", "dense")
 
@@ -27,6 +28,27 @@ class RetrievalResult:
 def retrieve(
     query: str, top_k: int, mode: str | None = None, filters: Filters | None = None
 ) -> RetrievalResult:
+    """Retrieve chunks, in-process or from the retrieval service.
+
+    Callers get the same `RetrievalResult` either way, so nothing upstream knows
+    or cares whether the split is switched on.
+    """
+    if not runs_locally(RETRIEVAL):
+        from app.clients import retrieval_client
+
+        remote = retrieval_client.retrieve(query, top_k, mode, filters)
+        return RetrievalResult(
+            chunks=[c.to_chunk() for c in remote.chunks],
+            confidence=remote.confidence,
+            mode=remote.mode,
+        )
+    return retrieve_local(query, top_k, mode, filters)
+
+
+def retrieve_local(
+    query: str, top_k: int, mode: str | None = None, filters: Filters | None = None
+) -> RetrievalResult:
+    """The actual retrieval. The retrieval service calls this directly."""
     resolved = (mode or get_config().retrieval.mode).lower()
     if resolved not in VALID_MODES:
         resolved = "hybrid"
