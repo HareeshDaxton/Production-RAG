@@ -13,8 +13,24 @@ from app.modules.ingestion.chunker import chunk_document
 from app.modules.ingestion.indexer import index_chunks
 from app.modules.ingestion.loader import load_documents
 from app.modules.retrieval.sparse import rebuild_bm25_index
+from app.services.role import RETRIEVAL, runs_locally
 
 logger = get_logger(__name__)
+
+
+def _refresh_keyword_index() -> None:
+    """Keep BM25 in step with the vectors.
+
+    The index belongs to whoever queries it, so when retrieval runs in its own
+    process the ingestion service asks it to rebuild rather than writing the
+    index across a container boundary.
+    """
+    if runs_locally(RETRIEVAL):
+        rebuild_bm25_index()
+        return
+    from app.clients import retrieval_client
+
+    retrieval_client.rebuild_bm25()
 
 
 @dataclass
@@ -45,7 +61,7 @@ def delete_document(source: str) -> int:
         return 0
 
     store.delete_ids(ids)
-    rebuild_bm25_index()
+    _refresh_keyword_index()
     # Deleting changes what is retrievable, so cached answers built from this
     # document must not keep being served.
     record_ingestion(f"delete:{source}", 0, 0)
@@ -101,7 +117,7 @@ def ingest_directory(source_dir: str | Path | None = None, reset: bool = False) 
     n = index_chunks(chunks)
 
     # Keep the BM25 sparse index in sync with the dense index (hybrid needs both).
-    rebuild_bm25_index()
+    _refresh_keyword_index()
 
     record_ingestion(source=str(src), documents=len(docs), chunks=n)
     logger.info(
