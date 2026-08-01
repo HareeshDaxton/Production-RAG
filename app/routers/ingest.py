@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from app.clients.vectorstore import EmbeddingDimensionMismatch
 from app.config import get_config
 from app.models.schemas import (
     DocumentsResponse,
@@ -30,6 +31,8 @@ def ingest(req: IngestRequest) -> IngestResponse:
         result = ingest_directory(req.source_dir, reset=req.reset)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except EmbeddingDimensionMismatch as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return IngestResponse(
         documents_ingested=result.documents,
         chunks_created=result.chunks,
@@ -53,7 +56,12 @@ async def ingest_upload(
             )
         payloads.append((name, await f.read()))
 
-    result = ingest_files(payloads, reset=reset)
+    try:
+        result = ingest_files(payloads, reset=reset)
+    except EmbeddingDimensionMismatch as exc:
+        # 409, not 500: the request is fine, the index is stale. A raw 500 escapes the
+        # CORS middleware, so the browser reports it as an unreachable API.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return IngestResponse(
         documents_ingested=result.documents,
         chunks_created=result.chunks,
