@@ -22,6 +22,7 @@ from app.modules.quality.service import QualityReport, assess
 from app.modules.quality.verifier import CitationCheck
 from app.modules.retrieval.dense import RetrievedChunk
 from app.modules.retrieval.filters import Filters
+from app.modules.retrieval.identifiers import identifier_filter
 from app.modules.retrieval.retriever import VALID_MODES, RetrievalResult, retrieve
 
 logger = get_logger(__name__)
@@ -153,7 +154,9 @@ def ask(
     resolved_mode = (mode or cfg.retrieval.mode).lower()
     if resolved_mode not in VALID_MODES:
         resolved_mode = "hybrid"
-    fdict = filters.as_dict() if filters else None
+    # An identifier question is scoped to the records it names *before* the cache
+    # key is built, so two ids differing by one digit can never share an answer.
+    fdict = identifier_filter(query, filters.as_dict() if filters else None)
 
     # Embed once: used for the cache lookup and (on a miss) reused for storage.
     embedding = get_embedder().embed_query(query)
@@ -187,7 +190,9 @@ def ask_stream(
     resolved_mode = (mode or cfg.retrieval.mode).lower()
     if resolved_mode not in VALID_MODES:
         resolved_mode = "hybrid"
-    fdict = filters.as_dict() if filters else None
+    # An identifier question is scoped to the records it names *before* the cache
+    # key is built, so two ids differing by one digit can never share an answer.
+    fdict = identifier_filter(query, filters.as_dict() if filters else None)
 
     embedding = get_embedder().embed_query(query)
     hit = cache_lookup(query, embedding, k, resolved_mode, fdict)

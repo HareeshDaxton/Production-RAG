@@ -34,7 +34,15 @@ def retrieve(
     if resolved == "dense":
         chunks = dense_retrieve(query, top_k, filters)
         confidence = retrieval_confidence([c.score for c in chunks], kind="similarity")
-        return RetrievalResult(chunks=chunks, confidence=confidence, mode="dense")
+    else:
+        chunks, confidence = hybrid_retrieve(query, top_k, filters)
+        resolved = "hybrid"
 
-    chunks, confidence = hybrid_retrieve(query, top_k, filters)
-    return RetrievalResult(chunks=chunks, confidence=confidence, mode="hybrid")
+    # An exact identifier match is stronger evidence than any similarity score: the
+    # record was found by equality on its id, not guessed at by nearest neighbour.
+    # Leaving it scored by cosine let the quality gate refuse answers built from
+    # provably correct records.
+    if chunks and filters and "record_id" in filters:
+        confidence = max(confidence, get_config().retrieval.identifier_match_confidence)
+
+    return RetrievalResult(chunks=chunks, confidence=confidence, mode=resolved)
